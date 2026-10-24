@@ -1,0 +1,10 @@
+node_modules
+dist
+.wrangler
+.dev.vars
+.secrets
+docs
+graphify-out
+*.sqlite
+*.env
+.git

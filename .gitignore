@@ -1,0 +1,14 @@
+node_modules/
+.wrangler/
+.secrets/
+.dev.vars
+*.log
+
+# local tooling / generated
+.claude/settings.local.json
+graphify-out/
+src/graphify-out/
+docs/
+dist/
+*.sqlite
+*.env

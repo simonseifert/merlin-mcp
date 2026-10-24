@@ -1,0 +1,42 @@
+name = "merlin-mcp"
+main = "src/index.ts"
+compatibility_date = "2026-04-01"
+compatibility_flags = ["nodejs_compat"]
+
+# MOODLE_URL is derived from the date in src/lib.ts (rolls over 1 October, Europe/Zagreb time).
+# Every MCP tool and REST endpoint also accepts an explicit `year` (e.g. 2025-2026).
+# Uncomment only to pin a specific academic year:
+# [vars]
+# MOODLE_URL = "https://moodle.srce.hr/2025-2026"
+# MERLIN_YEARS = "2025-2026,2026-2027"   # override the active-years list
+
+# MCP_BEARER opens only /mcp; API_BEARER opens only /api/*. Only "1" re-enables the old single-bearer mode.
+[vars]
+LEGACY_API_BEARER = "0"
+
+# Secrets (set via `wrangler secret put`):
+#   MOODLE_TOKEN: your Merlin web service token
+#   MCP_BEARER  : any long random string you pick; goes in the Authorization header
+#   API_BEARER  : secret for /api/*; cannot open /mcp
+#   RELAY_BEARER: secret for GET /api/pending (your approval relay only; without it there is no send tool)
+#   MOODLE_CONTACT (optional): email for the User-Agent so SRCE can reach you
+#   MOODLE_TOKENS (optional): JSON map {"2025-2026": "...", ...}; falls back to MOODLE_TOKEN
+
+# Unused since 0.4 (stateless /mcp). Empty stub kept so rollbacks to <0.4 still work;
+# remove later with a [[migrations]] deleted_classes = ["MerlinMCP"] entry.
+[[durable_objects.bindings]]
+name = "MCP_OBJECT"
+class_name = "MerlinMCP"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["MerlinMCP"]
+
+# Pending moodle_send_message requests awaiting the owner's phone approval (src/approvals.ts).
+[[durable_objects.bindings]]
+name = "APPROVALS"
+class_name = "ApprovalStore"
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["ApprovalStore"]
