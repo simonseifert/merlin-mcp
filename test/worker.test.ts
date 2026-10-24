@@ -382,6 +382,24 @@ describe('/api/file', () => {
 		expect(res.status).toBe(400);
 	});
 
+	it('drops caller-supplied token params and never streams a Moodle error page back', async () => {
+		fetchMock.mockResolvedValueOnce(new Response('error page echoing ?token=the-moodle-token', { status: 403 }));
+		const target = 'https://moodle.srce.hr/2025-2026/webservice/pluginfile.php/1/x.pdf?token=attacker&wstoken=x&wsfunction=core_user_update_users';
+		const res = await worker.fetch(new Request(`https://merlin-mcp.example/api/file?url=${encodeURIComponent(target)}`, { headers: AUTH }), ENV, fakeCtx());
+		const called = new URL(fetchMock.mock.calls[0][0] as string);
+		expect(called.searchParams.getAll('token')).toEqual(['the-moodle-token']);
+		expect(called.searchParams.has('wstoken') || called.searchParams.has('wsfunction')).toBe(false);
+		expect(res.status).toBe(502);
+		expect(await res.text()).not.toContain('the-moodle-token');
+	});
+
+	it('rejects non-file Moodle paths before any fetch', async () => {
+		const target = 'https://moodle.srce.hr/2025-2026/webservice/rest/server.php?wsfunction=core_user_update_users';
+		const res = await worker.fetch(new Request(`https://merlin-mcp.example/api/file?url=${encodeURIComponent(target)}`, { headers: AUTH }), ENV, fakeCtx());
+		expect(res.status).toBe(400);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
 	it('fetches a genuine moodle file URL with the token appended server-side', async () => {
 		fetchMock.mockResolvedValueOnce(new Response('file-bytes', { status: 200, headers: { 'Content-Type': 'application/pdf' } }));
 		const target = 'https://moodle.srce.hr/2025-2026/pluginfile.php/1/mod_resource/content/1/x.pdf';

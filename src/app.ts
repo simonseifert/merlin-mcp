@@ -1252,14 +1252,14 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 					return jsonResponse({ error: redactSecret(JSON.stringify(fan.errors), allTokens(env)) }, { status: 502 });
 				}
 				const out = items.map(({ year: y, also_in: _also, ...n }) => ({ ...n, _year: y }));
-				const res = jsonResponse(out);
+				const res = jsonResponse(withoutCredentials(out));
 				if (fan.errors) res.headers.set('X-Merlin-Errors', redactSecret(JSON.stringify(fan.errors), allTokens(env)));
 				return res;
 			}
 			if (year !== undefined) checkYear(year);
 			const items = await fetchNotifications(env, year, limit);
 			const filtered = unreadOnly ? items.filter((n) => !n.read) : items;
-			return jsonResponse(filtered);
+			return jsonResponse(withoutCredentials(filtered));
 		} catch (err) {
 			return errorResponse(err, env);
 		}
@@ -1306,10 +1306,12 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 		const target = url.searchParams.get('url') ?? '';
 		const fileUrl = parseAllowedMoodleFileUrl(target);
 		if (!fileUrl) {
-			return jsonResponse({ error: 'url must be an https://moodle.srce.hr/... file URL' }, { status: 400 });
+			return jsonResponse({ error: 'url must be an https://moodle.srce.hr/<yyyy-yyyy>/webservice/pluginfile.php/... (or /pluginfile.php/) file URL' }, { status: 400 });
 		}
 		// The year is the first path segment (https://moodle.srce.hr/2025-2026/pluginfile.php/...).
 		const fileYear = /^\/(\d{4}-\d{4})\//.exec(fileUrl.pathname)?.[1];
+		// Only our token goes out: drop anything the caller put in the auth slots.
+		for (const k of ['token', 'wstoken', 'wsfunction']) fileUrl.searchParams.delete(k);
 		fileUrl.searchParams.set('token', tokenForYear(env, fileYear ?? currentYear(env)));
 		let res: Response;
 		try {
@@ -1320,9 +1322,18 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 		if (isRedirectResponse(res)) {
 			return jsonResponse({ error: 'refusing to follow a redirect away from moodle.srce.hr' }, { status: 502 });
 		}
+		if (!res.ok) {
+			// Never stream an error page back: it could echo the request URL, token included.
+			await res.body?.cancel();
+			return jsonResponse({ error: `Moodle answered ${res.status} for that file` }, { status: res.status === 404 ? 404 : 502 });
+		}
 		return new Response(res.body, {
 			status: res.status,
-			headers: { 'Content-Type': res.headers.get('Content-Type') ?? 'application/octet-stream' },
+			headers: {
+				'Content-Type': res.headers.get('Content-Type') ?? 'application/octet-stream',
+				'Content-Disposition': res.headers.get('Content-Disposition') ?? 'attachment',
+				'X-Content-Type-Options': 'nosniff',
+			},
 		});
 	}
 

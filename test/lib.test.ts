@@ -204,6 +204,24 @@ describe('parseAllowedMoodleFileUrl', () => {
 		expect(parseAllowedMoodleFileUrl('https://moodle.srce.hr:443/2025-2026/pluginfile.php/1/x.pdf')).not.toBeNull();
 	});
 
+	it('accepts only the file-serving paths (the token must not reach other pages)', () => {
+		expect(parseAllowedMoodleFileUrl('https://moodle.srce.hr/2026-2027/webservice/pluginfile.php/1/mod_resource/content/1/x.pdf')).not.toBeNull();
+		for (const bad of [
+			'https://moodle.srce.hr/2026-2027/webservice/rest/server.php?wsfunction=core_user_update_users',
+			'https://moodle.srce.hr/2026-2027/mod/resource/view.php?id=1',
+			'https://moodle.srce.hr/2026-2027/login/token.php',
+			'https://moodle.srce.hr/pluginfile.php/1/x.pdf',
+			'https://moodle.srce.hr/2026-2027/webservice/pluginfile.php/../rest/server.php',
+			'https://moodle.srce.hr/2026-2027/webservice/pluginfile.php/..%2f..%2frest/server.php',
+		]) expect(parseAllowedMoodleFileUrl(bad)).toBeNull();
+	});
+
+	it('toToolResult strips credential fields and embedded keys from any tool output', () => {
+		const text = toToolResult({ userprivateaccesskey: 'k1', items: [{ url: 'https://moodle.srce.hr/2026-2027/tokenpluginfile.php/abc123/x.pdf' }] }).content[0].text;
+		expect(text).not.toContain('k1');
+		expect(text).not.toContain('abc123');
+	});
+
 	it('rejects userinfo-smuggled hosts', () => {
 		expect(parseAllowedMoodleFileUrl('https://moodle.srce.hr@evil.com/x.pdf')).toBeNull();
 	});

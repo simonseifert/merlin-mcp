@@ -431,6 +431,9 @@ export function parseAllowedMoodleFileUrl(target: string): URL | null {
 	if (url.protocol !== 'https:') return null;
 	if (url.hostname !== MOODLE_FILE_HOST) return null;
 	if (url.port !== '') return null; // only the default HTTPS port: the token must not reach another service on that host
+	// Only the file-serving scripts: the token is appended, so it must not reach any other Moodle page or endpoint.
+	if (!/^\/\d{4}-\d{4}\/(?:webservice\/)?pluginfile\.php\//.test(url.pathname)) return null;
+	if (/%2f|%5c|\\/i.test(url.pathname)) return null; // no encoded or back slashes that a server might re-split
 	return url;
 }
 
@@ -571,6 +574,8 @@ function fitItems(total: number, build: (n: number) => string, maxChars: number)
  */
 export function toToolResult(data: unknown, maxChars = 200_000): { content: Array<{ type: 'text'; text: string }> } {
 	const wrap = (text: string) => ({ content: [{ type: 'text' as const, text }] });
+	// Every tool result passes through here, so strip credentials once for all of them.
+	data = withoutCredentials(data);
 	const full = JSON.stringify(data) ?? 'null';
 	if (full.length <= maxChars) return wrap(full);
 
