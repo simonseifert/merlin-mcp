@@ -245,10 +245,10 @@ describe('send approval flow', () => {
 		expect(calls.some((c) => c.endsWith('core_message_send_instant_messages'))).toBe(false);
 	});
 
-	it('GET on an approve link never sends', async () => {
+	it('GET on an approve link shows a confirm page and never sends', async () => {
 		const env = makeEnv(newStore());
 		const item = await pendingLinks(env);
-		expect((await worker.fetch(new Request(item.approve_url), env, ctx)).status).toBe(405);
+		expect((await worker.fetch(new Request(item.approve_url), env, ctx)).status).toBe(200);
 		expect(calls.some((c) => c.endsWith('core_message_send_instant_messages'))).toBe(false);
 	});
 

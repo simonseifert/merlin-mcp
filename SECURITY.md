@@ -10,13 +10,13 @@ Report privately through GitHub: [Security > Report a vulnerability](https://git
 
 | Threat | What stops it |
 |---|---|
-| A Merlin message, forum post or notification tells the agent to do something | Every tool is read-only. The one write, `moodle_send_message`, only creates a pending send; it goes out after a `POST` with a 192-bit key that only your phone relay sees. The agent never gets the key. |
+| A Merlin message, forum post or notification tells the agent to do something | Every tool is read-only. The one write, `moodle_send_message`, only creates a pending send; it goes out after a `POST` with a 192-bit key that only your notifier (or your own relay) sees. The agent never gets the key. |
 | A "read" call that actually writes | `/api/call` accepts an exact, reviewed list of 19 functions and nothing else. No `*_view_*` function (they log events and change completion), nothing that mints a credential (autologin keys, QR tokens, calendar export tokens). The MCP tools use fixed functions. `core_message_get_messages` is forced to `markasread=0`. |
 | A leaked bearer | Three separate secrets: `MCP_BEARER` opens only `/mcp`, `API_BEARER` only `/api/*`, `RELAY_BEARER` only `/api/pending`. None of them can send a message. Bearers are compared in constant time. |
 | The token leaking through responses | The token is added server-side and sent in a POST body. Errors have it redacted. Credential fields (`userprivateaccesskey`, keys inside `tokenpluginfile.php` URLs, in plain, HTML-entity, percent-encoded and JSON-escaped forms) are stripped from every response. Callers can't override `wstoken`, `wsfunction` or `moodlewsrestformat`, including through PHP-style array parameter names. |
 | The server used as a proxy elsewhere | `/api/file` only fetches Moodle's file scripts (`https://moodle.srce.hr/<year>/webservice/pluginfile.php/...` or `/pluginfile.php/...`, default port only), drops any token the caller adds, refuses redirects, and never passes an error page back. |
 | Hammering Merlin | At most 120 Moodle calls a minute per process (file downloads included), and a pause for `Retry-After` after a 429 or 503. Callers get a 429 back and should cache. |
-| Approval links leaking | They need `POST` (link previews can't approve), work once, expire after 30 minutes, and their responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer`. At most 10 sends a day and 5 undecided at once. |
+| Approval links leaking | Acting needs `POST`; a `GET` only shows a confirm page, so link previews can't approve. A `POST` with a foreign `Origin` is refused (403). Links work once, expire after 30 minutes, and responses carry `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page adds a strict `Content-Security-Policy` and `X-Frame-Options: DENY`. The key travels to the channel you configure (ntfy topic, webhook): use a long random topic or a protected server. At most 10 sends a day and 5 undecided at once. |
 
 ## Known side effects (by design)
 
@@ -27,5 +27,6 @@ Report privately through GitHub: [Security > Report a vulnerability](https://git
 ## Not covered
 
 - Someone with shell access to the machine running the server or the relay can read its secrets.
+- Anyone who can read your ntfy topic or webhook sees the message text and the approval links, and can approve. Treat `NOTIFY_*` as secrets. Notifications never contain the Moodle token or any bearer.
 - The token is the same one the official mobile app uses for your account. On Merlin, students usually can't revoke it themselves; if it leaks, ask SRCE to revoke it.
 - There's no OAuth yet, so web connectors (claude.ai, ChatGPT) aren't supported.

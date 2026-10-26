@@ -82,6 +82,10 @@ export function envFromProcess(vars: NodeJS.ProcessEnv, approvals: Approvals): E
 		RELAY_BEARER: pick('RELAY_BEARER'),
 		MOODLE_CONTACT: pick('MOODLE_CONTACT'),
 		MERLIN_ENABLE_SEND: pick('MERLIN_ENABLE_SEND'),
+		NOTIFY_NTFY_URL: pick('NOTIFY_NTFY_URL'),
+		NOTIFY_NTFY_TOKEN: pick('NOTIFY_NTFY_TOKEN'),
+		NOTIFY_WEBHOOK_URL: pick('NOTIFY_WEBHOOK_URL'),
+		NOTIFY_WEBHOOK_FORMAT: pick('NOTIFY_WEBHOOK_FORMAT'),
 		APPROVALS: { idFromName: () => 'approvals', get: () => approvals },
 	};
 }

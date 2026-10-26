@@ -18,7 +18,12 @@ LEGACY_API_BEARER = "0"
 #   MOODLE_TOKEN: your Merlin web service token
 #   MCP_BEARER  : any long random string you pick; goes in the Authorization header
 #   API_BEARER  : secret for /api/*; cannot open /mcp
-#   RELAY_BEARER: secret for GET /api/pending (your approval relay only; without it there is no send tool)
+#   RELAY_BEARER: secret for GET /api/pending (your own approval relay only)
+#   NOTIFY_NTFY_URL (optional): ntfy topic URL, e.g. https://ntfy.sh/<long-random-topic>; built-in phone approval
+#   NOTIFY_NTFY_TOKEN (optional): bearer for a protected ntfy server
+#   NOTIFY_WEBHOOK_URL (optional): webhook that gets approval links (Discord, n8n, ...)
+#   NOTIFY_WEBHOOK_FORMAT (optional var): "json" (default) or "discord"
+#   (the send tool is offered only with RELAY_BEARER or a NOTIFY_* URL)
 #   MOODLE_CONTACT (optional): email for the User-Agent so SRCE can reach you
 #   MOODLE_TOKENS (optional): JSON map {"2025-2026": "...", ...}; falls back to MOODLE_TOKEN
 

@@ -34,7 +34,7 @@ export class ApprovalStore extends DurableObject implements ApprovalsApi {
 export class MerlinMCP extends DurableObject {}
 
 export default {
-	fetch(request: Request, env: Env): Promise<Response> {
-		return handle(request, env);
+	fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+		return handle(request, env, ctx);
 	},
 };

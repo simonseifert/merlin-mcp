@@ -57,9 +57,10 @@ import {
 	YearError,
 	zagrebTime,
 } from './lib.js';
+import { notifierConfigured, notifyOutcome, notifyPending, type NotifyEnv } from './notify.js';
 import { DAILY_SEND_CAP, PENDING_TTL_MS, type ApprovalsApi, type PendingSend } from './approvals.js';
 
-export interface Env {
+export interface Env extends NotifyEnv {
 	MOODLE_URL?: string; // optional hard override, e.g. https://moodle.srce.hr/2025-2026
 	MOODLE_BASE?: string; // optional, defaults to https://moodle.srce.hr
 	MERLIN_YEARS?: string; // optional active-years override, e.g. "2025-2026,2026-2027"
@@ -68,7 +69,7 @@ export interface Env {
 	MCP_BEARER: string; // Your own shared secret to gate the MCP endpoint (secret)
 	API_BEARER?: string; // secret for /api/* (automation); see README "Rotating the bearers"
 	LEGACY_API_BEARER?: string; // var: "1" lets MCP_BEARER open /api/* too (old single-bearer setups); anything else, or unset, keeps them separate
-	RELAY_BEARER?: string; // secret for GET /api/pending (the approval relay only); without it moodle_send_message is not offered
+	RELAY_BEARER?: string; // secret for GET /api/pending (the approval relay only); without it (and without a NOTIFY_* channel) moodle_send_message is not offered
 	MOODLE_CONTACT?: string; // secret: email put in the User-Agent so SRCE can reach the operator
 	/** The one approval store: a Durable Object namespace on Workers, a SQLite-backed stand-in on Node. */
 	APPROVALS: { idFromName(name: string): unknown; get(id: never): ApprovalsApi };
@@ -501,6 +502,18 @@ async function sendYear(env: Env, year: string | undefined, to_user_id: number):
 
 // ---------- Send approval ----------
 
+/** Per-request context: the Worker's waitUntil (if any) and the public origin approval links point at. */
+export interface RunCtx {
+	waitUntil?(p: Promise<unknown>): void;
+	origin?: string;
+}
+
+/** Keeps a notification alive past the response on Workers; fire and forget on Node. Notifiers never reject. */
+function background(ctx: RunCtx | undefined, p: Promise<unknown>): void {
+	const safe = p.catch(() => undefined);
+	if (ctx?.waitUntil) ctx.waitUntil(safe);
+}
+
 function approvals(env: Env) {
 	return env.APPROVALS.get(env.APPROVALS.idFromName('approvals') as never);
 }
@@ -512,7 +525,8 @@ function approvals(env: Env) {
  */
 export async function requestSend(
 	env: Env,
-	args: { to_user_id: number; text: string; year?: string }
+	args: { to_user_id: number; text: string; year?: string },
+	ctx?: RunCtx
 ): Promise<Record<string, unknown>> {
 	// Only people the owner already has a conversation with, in the year where it lives.
 	const { year, toName } = await sendYear(env, args.year, args.to_user_id);
@@ -521,6 +535,23 @@ export async function requestSend(
 		| { ok: false; error: string };
 	if (!res.ok) throw new Error(res.error);
 	const item = res.item;
+	// Only a NEW item is pushed; an idempotent duplicate must not notify twice.
+	if (!res.existing && notifierConfigured(env) && ctx?.origin) {
+		const base = `${ctx.origin}/api`;
+		background(
+			ctx,
+			notifyPending(env, {
+				id: item.id,
+				year,
+				to: toName ?? `user ${args.to_user_id}`,
+				text: item.text,
+				approve_url: `${base}/approve/${item.id}?k=${item.key}`,
+				reject_url: `${base}/reject/${item.id}?k=${item.key}`,
+				expires_at: new Date(item.expires).toISOString(),
+				expires_local: zagrebTime(item.expires / 1000) ?? '',
+			})
+		);
+	}
 	return {
 		status: 'pending_approval',
 		sent: false,
@@ -530,7 +561,7 @@ export async function requestSend(
 		to_user_id: args.to_user_id,
 		to_name: toName,
 		expires_at: new Date(item.expires).toISOString(),
-		expires_local: zagrebTime(item.expires / 1000),
+		expires_local: zagrebTime(item.expires / 1000) ?? '',
 		message: `Pending: nothing has been sent. The account owner gets a phone notification with the recipient and full text and must tap Send within ${
 			PENDING_TTL_MS / 60_000
 		} minutes. Tell the user it is waiting for their approval on the phone; do not retry. Check moodle_get_messages later to see whether it went out.`,
@@ -554,23 +585,69 @@ async function performSend(env: Env, item: PendingSend): Promise<number> {
 
 /** The approval links carry their key in the URL: keep them out of caches and Referer headers. */
 const PRIVATE_HEADERS = { 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
+const PAGE_HEADERS = {
+	...PRIVATE_HEADERS,
+	'Content-Type': 'text/html; charset=utf-8',
+	'Content-Security-Policy': "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'; frame-ancestors 'none'",
+	'X-Frame-Options': 'DENY',
+};
 
 function textResponse(body: string, status = 200): Response {
 	return new Response(body, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8', ...PRIVATE_HEADERS } });
 }
 
+function esc(s: string): string {
+	return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+/**
+ * GET confirm page: shows the stored message and one button that POSTs to the same URL.
+ * A GET never changes state, so link previews and prefetchers are harmless. An unknown
+ * id and a wrong key give the same 404 as the POST route.
+ */
+async function confirmPage(env: Env, action: 'approve' | 'reject', id: string, key: string): Promise<Response> {
+	const items = (await approvals(env).list()) as PendingSend[];
+	const item = items.find((i) => i.id === id);
+	// Compare against a dummy when the id is unknown so timing doesn't reveal which ids exist.
+	const keyOk = await constantTimeEqual(key, item?.key ?? 'missing-key-placeholder');
+	if (!item || !keyOk) return textResponse('Unknown or invalid approval link.', 404);
+	if (item.status === 'expired') return textResponse('This send expired (30 min). Nothing was sent.', 410);
+	if (item.status !== 'pending') return textResponse(`Already ${item.status}. Nothing more was done.`, 409);
+	const who = esc(item.to_name ?? `user ${item.to_user_id}`);
+	const approve = action === 'approve';
+	const html = `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">
+<title>${approve ? 'Send' : 'Reject'} Merlin message</title>
+<style>body{font:16px system-ui,sans-serif;max-width:36rem;margin:2rem auto;padding:0 1rem}pre{white-space:pre-wrap;word-break:break-word;background:#f3f3f3;padding:1rem;border-radius:6px}button{font:inherit;padding:.7rem 1.4rem;border:0;border-radius:6px;background:${approve ? '#1a7f37' : '#b42318'};color:#fff}dt{font-weight:600;margin-top:.6rem}dd{margin:0}</style>
+</head><body>
+<h1>${approve ? 'Send this Merlin message?' : 'Reject this Merlin message?'}</h1>
+<dl><dt>To</dt><dd>${who}</dd><dt>Year</dt><dd>${esc(item.year)}</dd><dt>Expires</dt><dd>${esc(new Date(item.expires).toISOString())} (${esc(zagrebTime(item.expires / 1000) ?? '')})</dd></dl>
+<pre>${esc(item.text)}</pre>
+<form method="post" action="/api/${action}/${id}?k=${encodeURIComponent(key)}"><button type="submit">${approve ? 'Send' : 'Reject'}</button></form>
+</body></html>`;
+	return new Response(html, { status: 200, headers: PAGE_HEADERS });
+}
+
 /** POST /api/approve/<id>?k=<key> and /api/reject/<id>?k=<key>: the phone's ntfy buttons. No bearer; the key is the credential. */
-async function handleDecision(request: Request, env: Env, action: 'approve' | 'reject', id: string, key: string): Promise<Response> {
-	// GET must never act: link previews and prefetchers would otherwise approve.
+async function handleDecision(request: Request, env: Env, action: 'approve' | 'reject', id: string, key: string, ctx?: RunCtx): Promise<Response> {
+	// GET must never act: it only shows a confirm page (link previews and prefetchers would otherwise approve).
+	if (request.method === 'GET') return confirmPage(env, action, id, key);
 	if (request.method !== 'POST') return textResponse('Use the Send / Reject button in the notification (POST).', 405);
+	// ntfy's phone app sends no Origin. A browser that does send one must send ours (blocks cross-site form posts).
+	const origin = request.headers.get('Origin');
+	if (origin !== null && origin !== new URL(request.url).origin) return textResponse('Cross-origin request refused.', 403);
 	const store = approvals(env);
 	const claim = (await store.claim(id, key, action)) as { ok: true; item: PendingSend } | { ok: false; status: number; error: string };
 	if (!claim.ok) return textResponse(claim.error, claim.status);
 	const who = claim.item.to_name ?? `user ${claim.item.to_user_id}`;
 	if (action === 'reject') return textResponse(`Rejected. Nothing was sent to ${who}.`);
+	const outcome = (result: 'sent' | 'failed' | 'unclear') => {
+		if (notifierConfigured(env)) background(ctx, notifyOutcome(env, { id, year: claim.item.year, to: who, result }));
+	};
 	try {
 		const msgid = await performSend(env, claim.item);
 		await store.finish(id, { msgid });
+		outcome('sent');
 		return textResponse(`Sent to ${who} (Merlin ${claim.item.year}).`);
 	} catch (err) {
 		const error = redactSecret(String(err), allTokens(env));
@@ -578,6 +655,7 @@ async function handleDecision(request: Request, env: Env, action: 'approve' | 'r
 		// A timeout, a dropped connection or a 5xx may have delivered it.
 		const ambiguous = !/^Error: (Moodle refused the message|Moodle HTTP 4\d\d|Moodle error)/.test(String(err));
 		await store.finish(id, { error, ambiguous });
+		outcome(ambiguous ? 'unclear' : 'failed');
 		if (ambiguous) {
 			return textResponse(`Unclear whether it was sent (${error}). Check the conversation in Merlin before sending again.`, 502);
 		}
@@ -605,7 +683,7 @@ async function handlePending(env: Env, origin: string): Promise<Response> {
 // ---------- MCP agent ----------
 
 /** Registers every tool on a fresh server. Stateless: one server per /mcp request (or per stdio process). */
-export function registerTools(server: McpServer, getEnv: () => Env): void {
+export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx): void {
 	const env = getEnv;
 	// Every tool except moodle_send_message only reads, so clients can run them without a confirm prompt.
 	const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
@@ -867,8 +945,8 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 		}
 	);
 
-	// Sending needs an approval relay (RELAY_BEARER): without one nobody can tap Send, so the tool is left out.
-	if (env().MERLIN_ENABLE_SEND !== '0' && env().RELAY_BEARER) {
+	// Sending needs a way to approve: a relay (RELAY_BEARER) or a built-in notifier (NOTIFY_*). Without one nobody can tap Send, so the tool is left out.
+	if (env().MERLIN_ENABLE_SEND !== '0' && (env().RELAY_BEARER || notifierConfigured(env()))) {
 		// 6c. Private messages (send): the only write. The tool only *requests* a send;
 		// it happens when the owner taps Send on their phone (see src/approvals.ts).
 		server.tool(
@@ -880,7 +958,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 				year: idYearParam,
 			},
 			{ title: 'Request a Merlin message (the owner approves on their phone)', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
-			async ({ to_user_id, text, year }) => toToolResult(await requestSend(env(), { to_user_id, text, year }))
+			async ({ to_user_id, text, year }) => toToolResult(await requestSend(env(), { to_user_id, text, year }, ctx))
 		);
 	}
 
@@ -1173,9 +1251,9 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 }
 
-export function createServer(env: Env): McpServer {
+export function createServer(env: Env, ctx?: RunCtx): McpServer {
 	const server = new McpServer({ name: 'merlin-mcp', version: VERSION });
-	registerTools(server, () => env);
+	registerTools(server, () => env, ctx);
 	return server;
 }
 
@@ -1183,8 +1261,8 @@ export function createServer(env: Env): McpServer {
  * POST /mcp, stateless Streamable HTTP: a new server and transport per request, JSON responses.
  * Every tool is stateless, so nothing is lost between requests and no session store is needed.
  */
-async function handleMcp(request: Request, env: Env): Promise<Response> {
-	const server = createServer(env);
+async function handleMcp(request: Request, env: Env, ctx?: RunCtx): Promise<Response> {
+	const server = createServer(env, { ...ctx, origin: new URL(request.url).origin });
 	const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
 	await server.connect(transport);
 	return transport.handleRequest(request);
@@ -1218,7 +1296,7 @@ function errorResponse(err: unknown, env: Env): Response {
 	return res;
 }
 
-export async function handle(request: Request, env: Env): Promise<Response> {
+export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: Promise<unknown>): void }): Promise<Response> {
 	const url = new URL(request.url);
 
 	// Liveness only: no auth, no Moodle call, nothing about the account.
@@ -1227,7 +1305,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 	// Approval buttons: no bearer, the unguessable per-item key is the credential.
 	const decision = /^\/api\/(approve|reject)\/([0-9a-f]{16})$/.exec(url.pathname);
 	if (decision) {
-		return handleDecision(request, env, decision[1] as 'approve' | 'reject', decision[2], url.searchParams.get('k') ?? '');
+		return handleDecision(request, env, decision[1] as 'approve' | 'reject', decision[2], url.searchParams.get('k') ?? '', ctx);
 	}
 
 	// The relay's own secret, never the MCP bearer: whoever can read pending
@@ -1246,7 +1324,7 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 		return new Response('Unauthorized', { status: 401 });
 	}
 
-	if (url.pathname === '/mcp') return handleMcp(request, env);
+	if (url.pathname === '/mcp') return handleMcp(request, env, ctx);
 
 	// Plain REST shortcut for automation (n8n etc.): skips the MCP session
 	// handshake. Always a JSON array of raw Moodle notification objects (the

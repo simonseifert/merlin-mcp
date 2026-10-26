@@ -49,17 +49,39 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 
 ## Sending a message (phone approval)
 
-The model can only *request* a send. It never receives the approval key, and no bearer-authenticated route can send.
+The model can only *request* a send. It never receives the approval key, and no bearer-authenticated route can send. Merlin tells you through a built-in notifier; you approve with one tap.
 
 ```
 agent ─► moodle_send_message ─► pending send (random id + 192-bit key, 30 min expiry); the agent gets "pending_approval", never the key
-your relay (polls GET /api/pending with RELAY_BEARER) ─► pushes recipient + full text to your phone with [Send] [Reject]
+server ─► your notifier (ntfy or webhook) ─► recipient + full text, with [Send] [Reject]
 your phone ─► POST /api/approve/<id>?k=<key>  ─► the server sends exactly the stored text
            └► POST /api/reject/<id>?k=<key>   ─► marked rejected, nothing sent
 ```
 
-- **The relay is yours to run.** Anything that can poll `/api/pending` and show two buttons that send a `POST` works. [ntfy](https://ntfy.sh)'s `http` actions do; plain link buttons (Telegram, Pushover, Discord) open a `GET`, which the approval routes refuse on purpose (a built-in notifier with a confirm page is on the roadmap). Without `RELAY_BEARER` the tool isn't offered at all, because nobody could approve it. `MERLIN_ENABLE_SEND=0` also turns it off.
-- **Limits.** Recipients must be people you already have a Merlin conversation with. Plain text, at most 1800 characters. At most 10 sends per Zagreb day (a failed send gives its slot back) and 5 undecided requests at once. Each link works once, needs `POST` (so link previews can't approve), and expires after 30 minutes.
+**ntfy (two lines).** Install the [ntfy](https://ntfy.sh) app, subscribe to a long random topic, and set:
+
+```
+NOTIFY_NTFY_URL=https://ntfy.sh/<your-long-random-topic>
+NOTIFY_NTFY_TOKEN=...        # optional, for a protected or self-hosted server
+```
+
+The notification shows the recipient and the full text with **Send** and **Reject** buttons that `POST` straight from the app.
+
+**Discord (or any webhook).**
+
+```
+NOTIFY_WEBHOOK_URL=https://discord.com/api/webhooks/...
+NOTIFY_WEBHOOK_FORMAT=discord   # or "json" (the default) for n8n, Home Assistant, Make, your own script
+```
+
+Webhook links cannot `POST`, so they open a **confirm page** (`GET /api/approve/<id>?k=<key>`) that shows the recipient, year, full text and expiry with one button. A `GET` never changes anything, so link previews and prefetchers are harmless. `json` posts `{event, id, year, to, text, approve_url, reject_url, expires_at}`; a short `send_outcome` event follows after you approve (sent, failed, or unclear).
+
+On Workers set these as `wrangler secret put` (they contain secrets: the topic and webhook URL are credentials). On Node/Docker put them in `merlin.env`; behind a proxy also set `MERLIN_PUBLIC_URL` so the links point at your public address.
+
+- **Your own relay still works.** Anything that polls `GET /api/pending` with `RELAY_BEARER` and shows two buttons that `POST` is supported exactly as before. The send tool is offered when `RELAY_BEARER` **or** a notifier is configured; with neither, nobody could approve, so it is left out. `MERLIN_ENABLE_SEND=0` also turns it off.
+- **What the channel sees.** The notification carries the full message text and the approval links (the key is in the link). Whoever can read the topic or webhook can approve, so use a long random topic or a protected server, not a shared channel. Notification errors are logged without URLs, time out after 5 s, and never fail the request.
+- **Browser posts.** A `POST` carrying an `Origin` header other than this server's is refused (403). The ntfy phone app sends none, and the confirm page's own button sends the right one.
+- **Limits.** Recipients must be people you already have a Merlin conversation with. Plain text, at most 1800 characters. At most 10 sends per Zagreb day (a failed send gives its slot back) and 5 undecided requests at once. Each link works once, needs `POST` to act, and expires after 30 minutes.
 - **Why.** Merlin messages and forum posts are untrusted input. A prompt injection in one of them must not be able to make the agent send anything.
 
 ## Multiple years
@@ -77,7 +99,8 @@ your phone ─► POST /api/approve/<id>?k=<key>  ─► the server sends exactl
 - `GET /api/notifications?unread_only=true&limit=20[&year=]`: a JSON array of raw notification objects. `year=all` merges every active year.
 - `GET /api/file?url=<https://moodle.srce.hr/...>`: a file proxy. The token is added server-side; redirects are refused, not followed.
 - `GET /api/pending` (`RELAY_BEARER` only): the last 24 h of send requests with `approve_url` / `reject_url` while pending.
-- `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 404, 409, 410, 429, 405. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`.
+- `GET /api/approve/<id>?k=<key>`, `GET /api/reject/<id>?k=<key>`: no bearer. An HTML confirm page with one `POST` button; changes nothing. 404 for an unknown id or wrong key.
+- `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 403 (foreign `Origin`), 404, 409, 410, 429. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page also sets a strict `Content-Security-Policy` and `X-Frame-Options: DENY`.
 
 ## Getting your token
 
