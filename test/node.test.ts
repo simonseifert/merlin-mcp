@@ -49,8 +49,8 @@ describe('Node: SQLite approval store', () => {
 		const server = startHttp(env, 0);
 		await new Promise((r) => server.once('listening', r));
 		const port = (server.address() as { port: number }).port;
-		const body: string = await new Promise((resolve, reject) => {
-			const req = httpRequest({ host: '127.0.0.1', port, path: '/api/pending', headers: { Host: 'evil.example', Authorization: 'Bearer relay' } }, (res) => {
+		const get = (path: string): Promise<string> => new Promise((resolve, reject) => {
+			const req = httpRequest({ host: '127.0.0.1', port, path, headers: { Host: 'evil.example', Authorization: 'Bearer relay' } }, (res) => {
 				let d = '';
 				res.on('data', (c) => (d += c));
 				res.on('end', () => resolve(d));
@@ -58,7 +58,11 @@ describe('Node: SQLite approval store', () => {
 			req.on('error', reject);
 			req.end();
 		});
+		const body = await get('/api/pending');
+		const absolute = await get('http://evil.example/api/pending'); // absolute-form request target
 		server.close();
+		expect(absolute).not.toContain('evil.example');
+		expect(absolute).toContain(`http://localhost:${port}/api/approve/`);
 		expect(body).not.toContain('evil.example');
 		expect(body).toContain(`http://localhost:${port}/api/approve/`);
 	});
