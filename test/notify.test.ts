@@ -316,14 +316,12 @@ describe('POST hardening', () => {
 		return { env, links: linksFrom(notifyCalls[0]) };
 	}
 
-	it('refuses a cross-origin POST (nothing sent), then still accepts the real one', async () => {
+	it('a POST from another origin (ntfy web/desktop) works with the key, and a wrong key is still refused', async () => {
 		const { env, links } = await setup();
-		const evil = await worker.fetch(new Request(links.approve, { method: 'POST', headers: { Origin: 'https://evil.example' } }), env, ctx());
-		expect(evil.status).toBe(403);
-		const nul = await worker.fetch(new Request(links.approve, { method: 'POST', headers: { Origin: 'null' } }), env, ctx());
-		expect(nul.status).toBe(403);
+		const bad = await worker.fetch(new Request(links.approve.replace(/k=[0-9a-f]+/, 'k=' + '0'.repeat(48)), { method: 'POST', headers: { Origin: 'https://ntfy.example' } }), env, ctx());
+		expect(bad.status).toBe(404);
 		expect(moodleCalls).not.toContain('core_message_send_instant_messages');
-		const ok = await worker.fetch(new Request(links.approve, { method: 'POST' }), env, ctx());
+		const ok = await worker.fetch(new Request(links.approve, { method: 'POST', headers: { Origin: 'https://ntfy.example' } }), env, ctx());
 		expect(ok.status).toBe(200);
 	});
 

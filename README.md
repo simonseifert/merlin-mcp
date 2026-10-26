@@ -80,7 +80,6 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 
 - **Your own relay still works.** Anything that polls `GET /api/pending` with `RELAY_BEARER` and shows two buttons that `POST` is supported exactly as before. The send tool is offered when `RELAY_BEARER` **or** a notifier is configured; with neither, nobody could approve, so it is left out. `MERLIN_ENABLE_SEND=0` also turns it off.
 - **What the channel sees.** The notification carries the full message text and the approval links (the key is in the link). Whoever can read the topic or webhook can approve, so use a long random topic or a protected server, not a shared channel. Notification errors are logged without URLs, time out after 5 s, and never fail the request.
-- **Browser posts.** A `POST` carrying an `Origin` header other than this server's is refused (403). The ntfy phone app sends none, and the confirm page's own button sends the right one.
 - **Limits.** Recipients must be people you already have a Merlin conversation with. Plain text, at most 1800 characters. At most 10 sends per Zagreb day (a failed send gives its slot back) and 5 undecided requests at once. Each link works once, needs `POST` to act, and expires after 30 minutes.
 - **Why.** Merlin messages and forum posts are untrusted input. A prompt injection in one of them must not be able to make the agent send anything.
 
@@ -100,7 +99,7 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 - `GET /api/file?url=<https://moodle.srce.hr/...>`: a file proxy. The token is added server-side; redirects are refused, not followed.
 - `GET /api/pending` (`RELAY_BEARER` only): the last 24 h of send requests with `approve_url` / `reject_url` while pending.
 - `GET /api/approve/<id>?k=<key>`, `GET /api/reject/<id>?k=<key>`: no bearer. An HTML confirm page with one `POST` button; changes nothing. 404 for an unknown id or wrong key.
-- `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 403 (foreign `Origin`), 404, 409, 410, 429. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page also sets a strict `Content-Security-Policy` and `X-Frame-Options: DENY`.
+- `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 404, 409, 410, 429. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page also sets a strict `Content-Security-Policy` and `X-Frame-Options: DENY`.
 
 ## Getting your token
 

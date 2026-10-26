@@ -4,7 +4,6 @@
 
 - Built-in notifier: set `NOTIFY_NTFY_URL` (+ `NOTIFY_NTFY_TOKEN`) or `NOTIFY_WEBHOOK_URL` (+ `NOTIFY_WEBHOOK_FORMAT=json|discord`) and a new send request pushes the recipient, full text and Send / Reject links to your phone, with a short outcome message after. No relay script needed; `RELAY_BEARER` and `/api/pending` still work.
 - `GET /api/approve/<id>` and `/api/reject/<id>` now show a confirm page (one `POST` button, strict CSP, never acts) instead of 405.
-- A `POST` to the approval routes with a foreign `Origin` header is refused with 403 (ntfy's app sends none).
 - The send tool is offered when `RELAY_BEARER` or a notifier is configured.
 - The Worker passes `ctx` through so notifications finish after the response.
 - `scripts/get-token.mjs` and a step-by-step "Getting your token" guide in the README.

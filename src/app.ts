@@ -633,9 +633,8 @@ async function handleDecision(request: Request, env: Env, action: 'approve' | 'r
 	// GET must never act: it only shows a confirm page (link previews and prefetchers would otherwise approve).
 	if (request.method === 'GET') return confirmPage(env, action, id, key);
 	if (request.method !== 'POST') return textResponse('Use the Send / Reject button in the notification (POST).', 405);
-	// ntfy's phone app sends no Origin. A browser that does send one must send ours (blocks cross-site form posts).
-	const origin = request.headers.get('Origin');
-	if (origin !== null && origin !== new URL(request.url).origin) return textResponse('Cross-origin request refused.', 403);
+	// No Origin check on purpose: a cross-site post would still need the 192-bit per-item key from the link,
+	// and ntfy's web and desktop apps post from their own origin, which an Origin rule would wrongly refuse.
 	const store = approvals(env);
 	const claim = (await store.claim(id, key, action)) as { ok: true; item: PendingSend } | { ok: false; status: number; error: string };
 	if (!claim.ok) return textResponse(claim.error, claim.status);
