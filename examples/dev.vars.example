@@ -1,0 +1,8 @@
+# Cloudflare Worker local dev (`npm run dev`) against the fake Merlin.
+# Copy to .dev.vars (gitignored) in the repo root. Placeholders only; the fake accepts any token.
+# Start the fake first:  node examples/fake-moodle.mjs
+MOODLE_BASE=http://127.0.0.1:8790
+MERLIN_YEARS=2025-2026,2026-2027
+MOODLE_TOKEN=anything-works-here
+MCP_BEARER=demo-mcp-bearer
+API_BEARER=demo-api-bearer

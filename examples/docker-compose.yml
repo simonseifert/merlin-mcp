@@ -1,0 +1,26 @@
+# Zero-to-working demo: merlin-mcp against a fake Merlin with invented data.
+#   docker compose -f examples/docker-compose.yml up --build
+# Then see examples/README.md. Nothing here talks to the internet or to a real Merlin.
+services:
+  fake-moodle:
+    image: node:22-slim
+    command: ["node", "/app/fake-moodle.mjs"]
+    environment:
+      HOST: 0.0.0.0
+      PORT: "8790"
+    volumes:
+      - ./fake-moodle.mjs:/app/fake-moodle.mjs:ro
+
+  merlin-mcp:
+    build:
+      context: ..
+    depends_on:
+      - fake-moodle
+    environment:
+      MOODLE_BASE: http://fake-moodle:8790
+      MERLIN_YEARS: 2025-2026,2026-2027
+      MOODLE_TOKEN: anything-works-here   # the fake accepts any token
+      MCP_BEARER: demo-mcp-bearer
+      API_BEARER: demo-api-bearer
+    ports:
+      - "127.0.0.1:8787:8787"             # reachable from this machine only

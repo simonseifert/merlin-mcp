@@ -6,12 +6,18 @@
 
 > Unofficial. Not affiliated with or endorsed by SRCE or any university. Use it only with your own account, follow your institution's rules (AAI@EduHr included), and keep the call volume low. See [SECURITY.md](SECURITY.md) for the security model.
 
+![Terminal demo: merlin-mcp answering whoami, deadlines and grades from a fake Merlin](docs-assets/demo.gif)
+
+*Recorded against a fake Merlin with invented data. Try it yourself in a few commands: [examples/](examples/README.md).*
+
 ## What it does
 
-```
-MCP clients (Claude Code, Codex, Cursor, ...) ──► /mcp (stateless streamable HTTP) ─┐
-your automation (cron, n8n, scripts)          ──► /api/call, /api/file, ...        ├─► Worker or Node ─► moodle.srce.hr/<yyyy-yyyy>/webservice/rest
-your phone (approval relay buttons)           ──► /api/approve, /api/reject         ─┘   (bearer auth)       (your token added server-side)
+```mermaid
+flowchart LR
+    A["MCP clients<br/>(Claude Code, Codex, Cursor)"] -->|"/mcp, stateless streamable HTTP"| S
+    B["Your automation<br/>(cron, n8n, scripts)"] -->|"/api/call, /api/file"| S
+    C["Your phone<br/>(approval buttons)"] -->|"/api/approve, /api/reject"| S
+    S["merlin-mcp<br/>Worker or Node<br/>bearer auth, your token added server-side"] -->|"POST /yyyy-yyyy/webservice/rest/server.php"| M["Merlin<br/>moodle.srce.hr"]
 ```
 
 - **Every active academic year at once.** Merlin runs one Moodle site per academic year (`https://moodle.srce.hr/<start>-<end>`), each with its own database, so ids are only unique within a year. The server reads the current year (rolls over on 1 October, Europe/Zagreb) plus the previous one, plus next year from 1 September once its site answers. `MERLIN_YEARS="2025-2026,2026-2027"` overrides the list and `MOODLE_URL` pins one year.
