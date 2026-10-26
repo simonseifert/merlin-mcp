@@ -150,7 +150,7 @@ docker run --env-file merlin.env -p 8787:8787 -v merlin-data:/data merlin-mcp
 
 - **stdio is always read-only:** it never offers `moodle_send_message` and creates no database file.
 - **Listening address:** the Node server listens on `127.0.0.1` only unless you set `HOST` (the Docker image sets `HOST=0.0.0.0`). `GET /healthz` answers without auth and without calling Moodle, for health checks.
-- **Reachability:** a server on your LAN or tailnet works for CLI agents. claude.ai and ChatGPT connect from their own clouds and need a public HTTPS URL plus OAuth, which this server doesn't have yet. Behind a reverse proxy, set `MERLIN_PUBLIC_URL` so approval links use the public address.
+- **Reachability:** a server on your LAN or tailnet works for CLI agents. claude.ai and ChatGPT connect from their own clouds and need a public HTTPS URL plus OAuth, which this server doesn't have yet. Set `MERLIN_PUBLIC_URL` (for example behind a reverse proxy) so approval links use your public address; without it they point at `localhost`, never at whatever Host header a request carries.
 
 After a deploy, check: `moodle_whoami` answers for each year, `tools/list` returns the tools, and `/api/call?wsfunction=core_webservice_get_site_info` works with the API bearer and fails (401) with the MCP bearer.
 

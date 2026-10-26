@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { Approvals } from '../src/approvals.js';
-import { envFromProcess, sqliteKv } from '../src/node.js';
+import { envFromProcess, sqliteKv, startHttp } from '../src/node.js';
+import { request as httpRequest } from 'node:http';
 
 const db = () => join(mkdtempSync(join(tmpdir(), 'merlin-')), 'm.sqlite');
 
@@ -38,5 +39,27 @@ describe('Node: SQLite approval store', () => {
 		const env = envFromProcess({ MOODLE_TOKEN: 't', MCP_BEARER: 'b', API_BEARER: '' }, new Approvals(sqliteKv(db())));
 		expect(env.LEGACY_API_BEARER).toBe('0');
 		expect(env.API_BEARER).toBeUndefined();
+	});
+
+	it('approval links never follow a forged Host header', async () => {
+		const approvals = new Approvals(sqliteKv(db()));
+		const made = await approvals.create({ year: '2026-2027', to_user_id: 7, text: 'Bok' });
+		if (!made.ok) throw new Error(made.error);
+		const env = envFromProcess({ MOODLE_TOKEN: 't', MCP_BEARER: 'm', RELAY_BEARER: 'relay' }, approvals);
+		const server = startHttp(env, 0);
+		await new Promise((r) => server.once('listening', r));
+		const port = (server.address() as { port: number }).port;
+		const body: string = await new Promise((resolve, reject) => {
+			const req = httpRequest({ host: '127.0.0.1', port, path: '/api/pending', headers: { Host: 'evil.example', Authorization: 'Bearer relay' } }, (res) => {
+				let d = '';
+				res.on('data', (c) => (d += c));
+				res.on('end', () => resolve(d));
+			});
+			req.on('error', reject);
+			req.end();
+		});
+		server.close();
+		expect(body).not.toContain('evil.example');
+		expect(body).toContain(`http://localhost:${port}/api/approve/`);
 	});
 });

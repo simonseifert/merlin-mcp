@@ -121,7 +121,10 @@ async function send(res: ServerResponse, response: Response): Promise<void> {
 export function startHttp(env: Env, port: number, publicUrl?: string, host = '127.0.0.1') {
 	const server = createHttpServer(async (req, res) => {
 		try {
-			const base = publicUrl ?? `http://${req.headers.host ?? `localhost:${port}`}`;
+			// Never trust the Host header for the base: approval links (with their key) are built from it,
+			// so a caller could otherwise point the owner's Send button at their own server.
+			const listening = server.address();
+			const base = publicUrl ?? `http://localhost:${typeof listening === 'object' && listening ? listening.port : port}`;
 			await send(res, await handle(toRequest(req, base), env));
 		} catch (err) {
 			res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Internal error');
