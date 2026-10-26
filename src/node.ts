@@ -1,7 +1,7 @@
 /**
  * Node entry: the same server as the Worker, without Cloudflare.
  *
- *   node dist/node.js            HTTP on $PORT (default 8787): /mcp, /api/*, approvals
+ *   node dist/node.js            HTTP on $HOST:$PORT (default 127.0.0.1:8787): /mcp, /api/*, approvals
  *   node dist/node.js --stdio    MCP over stdin/stdout for one local client, read-only
  *
  * Config comes from environment variables with the same names as the Worker's
@@ -48,6 +48,26 @@ export function sqliteKv(path: string): KvStorage {
 	};
 }
 
+/** In-memory KvStorage, for stdio mode (no sends, so nothing worth persisting). */
+export function memoryKv(): KvStorage {
+	const m = new Map<string, string>();
+	return {
+		async get<T>(k: string) {
+			const v = m.get(k);
+			return v === undefined ? undefined : (JSON.parse(v) as T);
+		},
+		async put<T>(k: string, v: T) {
+			m.set(k, JSON.stringify(v));
+		},
+		async delete(k: string) {
+			return m.delete(k);
+		},
+		async list<T>({ prefix }: { prefix: string }) {
+			return new Map([...m].filter(([k]) => k.startsWith(prefix)).sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => [k, JSON.parse(v) as T]));
+		},
+	};
+}
+
 export function envFromProcess(vars: NodeJS.ProcessEnv, approvals: Approvals): Env {
 	const pick = (k: string) => (vars[k] && vars[k]!.length > 0 ? vars[k] : undefined);
 	return {
@@ -85,10 +105,16 @@ function toRequest(req: IncomingMessage, base: string): Request {
 async function send(res: ServerResponse, response: Response): Promise<void> {
 	res.writeHead(response.status, Object.fromEntries(response.headers));
 	if (!response.body) return void res.end();
-	Readable.fromWeb(response.body as never).pipe(res);
+	const body = Readable.fromWeb(response.body as never);
+	// A broken upstream stream (e.g. Moodle dropping a file download) must not crash the process.
+	body.on('error', (err) => {
+		console.error('merlin-mcp: response stream failed:', err instanceof Error ? err.message : 'unknown');
+		res.destroy();
+	});
+	body.pipe(res);
 }
 
-export function startHttp(env: Env, port: number, publicUrl?: string) {
+export function startHttp(env: Env, port: number, publicUrl?: string, host = '127.0.0.1') {
 	const server = createHttpServer(async (req, res) => {
 		try {
 			const base = publicUrl ?? `http://${req.headers.host ?? `localhost:${port}`}`;
@@ -98,13 +124,14 @@ export function startHttp(env: Env, port: number, publicUrl?: string) {
 			console.error('merlin-mcp:', err instanceof Error ? err.message : 'request failed');
 		}
 	});
-	server.listen(port);
+	server.listen(port, host);
 	return server;
 }
 
 async function main() {
 	const stdio = process.argv.includes('--stdio');
-	const approvals = new Approvals(sqliteKv(process.env.MERLIN_DB ?? 'merlin.sqlite'));
+	// stdio never offers the send tool, so it needs no approval store and creates no database file.
+	const approvals = new Approvals(stdio ? memoryKv() : sqliteKv(process.env.MERLIN_DB ?? 'merlin.sqlite'));
 	const env = envFromProcess(process.env, approvals);
 	if (!env.MOODLE_TOKEN && !env.MOODLE_TOKENS) throw new Error('Set MOODLE_TOKEN (or MOODLE_TOKENS).');
 	if (stdio) {
@@ -114,8 +141,13 @@ async function main() {
 	}
 	if (!env.MCP_BEARER) throw new Error('Set MCP_BEARER (the HTTP server never runs without auth).');
 	const port = Number(process.env.PORT ?? 8787);
-	startHttp(env, port, process.env.MERLIN_PUBLIC_URL);
-	console.error(`merlin-mcp listening on :${port} (POST /mcp)`);
+	// Only this machine by default. Set HOST=0.0.0.0 (the Docker image does) to accept other machines.
+	const host = process.env.HOST ?? '127.0.0.1';
+	const server = startHttp(env, port, process.env.MERLIN_PUBLIC_URL, host);
+	console.error(`merlin-mcp listening on ${host}:${port} (POST /mcp)`);
+	const stop = () => server.close(() => process.exit(0));
+	process.on('SIGTERM', stop);
+	process.on('SIGINT', stop);
 }
 
 if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {

@@ -1,6 +1,8 @@
 # Merlin MCP
 
-**TL;DR:** A read-only bridge from your own [Merlin](https://moodle.srce.hr) account (SRCE's Moodle for Croatian universities, Moodle 5.2) to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Cloudflare Worker or self-hosted on Node or Docker, from the same code. It serves MCP on `/mcp` and a few bearer-gated REST routes for automation. It never writes to Merlin, with one optional, gated exception: private messages, which go out only after you tap **Send** on your phone. (Reading a forum thread marks it read, exactly as opening it in a browser does.) One server holds one person's token; don't host other people's.
+[![CI](https://github.com/simonseifert/merlin-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/simonseifert/merlin-mcp/actions/workflows/ci.yml) [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-7c3aed.svg)](https://modelcontextprotocol.io)
+
+**TL;DR:** A read-only bridge from your own [Merlin](https://moodle.srce.hr) account (SRCE's Moodle for Croatian universities, Moodle 5.2) to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Cloudflare Worker or self-hosted on Node or Docker, from the same code. It serves MCP on `/mcp` and a few bearer-gated REST routes for automation. It never writes to Merlin, with one optional, gated exception: private messages, which go out only after you tap **Send** on your phone. Two reads leave the same traces a browser would: opening a forum thread marks it read, and asking `moodle_get_assignments` for feedback logs a "feedback viewed" event your teachers can see (off by default). One server holds one person's token; don't host other people's.
 
 > Unofficial. Not affiliated with or endorsed by SRCE or any university. Use it only with your own account, follow your institution's rules (AAI@EduHr included), and keep the call volume low. See [SECURITY.md](SECURITY.md) for the security model.
 
@@ -13,7 +15,7 @@ your phone (approval relay buttons)           ──► /api/approve, /api/rejec
 ```
 
 - **Every active academic year at once.** Merlin runs one Moodle site per academic year (`https://moodle.srce.hr/<start>-<end>`), each with its own database, so ids are only unique within a year. The server reads the current year (rolls over on 1 October, Europe/Zagreb) plus the previous one, plus next year from 1 September once its site answers. `MERLIN_YEARS="2025-2026,2026-2027"` overrides the list and `MOODLE_URL` pins one year.
-- **Polite by design.** An honest `User-Agent` (add your contact with `MOODLE_CONTACT`), the token in a POST body rather than the URL, at most 120 Moodle calls a minute, and a pause for `Retry-After` when Merlin answers 429 or 503.
+- **Polite by design.** An honest `User-Agent` (add your contact with `MOODLE_CONTACT`), the token in a POST body rather than the URL, at most 120 Moodle calls a minute per server process (file downloads included), and a pause for `Retry-After` when Merlin answers 429 or 503.
 - **Code layout:** `src/app.ts` is the platform-neutral core (routes, auth, MCP tools, Moodle client). `src/index.ts` is the Cloudflare entry, `src/node.ts` the Node entry (HTTP or stdio), `src/approvals.ts` the pending-send store, `src/lib.ts` the pure helpers (years, auth compare, the allow-list, redaction, HTML stripping). Tests are in `test/`, an agent skill in `skills/merlin/`, client snippets in [CLIENTS.md](CLIENTS.md).
 
 ## MCP tools
@@ -33,7 +35,7 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_get_recent_forum_posts` | mod_forum_get_forum_discussions | latest discussions in a forum |
 | `moodle_get_forum_discussion` | mod_forum_get_discussion_posts | full text of one thread (marks it read, like a browser) |
 | `moodle_get_grades` | gradereport_user_get_grade_items | grades and feedback, for one course or all |
-| `moodle_get_assignments` | mod_assign_get_assignments + mod_assign_get_submission_status | due dates, submission status and grader comments |
+| `moodle_get_assignments` | mod_assign_get_assignments (+ mod_assign_get_submission_status with `include_feedback`) | due dates; with `include_feedback=true` also submission status and grader comments, which logs a teacher-visible "feedback viewed" event |
 | `moodle_get_quiz_attempts` | mod_quiz_get_user_attempts | your attempts at a quiz |
 | `moodle_get_quiz_attempt_review` | mod_quiz_get_attempt_review | per-question marks and feedback of a finished attempt |
 | `moodle_get_messages` | core_message_get_conversations / core_message_get_conversation_messages | private-message inbox, or one full thread |
@@ -50,7 +52,7 @@ your phone ─► POST /api/approve/<id>?k=<key>  ─► the server sends exactl
            └► POST /api/reject/<id>?k=<key>   ─► marked rejected, nothing sent
 ```
 
-- **The relay is yours to run.** Anything that can poll `/api/pending` and show two buttons works: an [ntfy](https://ntfy.sh) script, a Telegram bot, Pushover. Without `RELAY_BEARER` the tool isn't offered at all, because nobody could approve it. `MERLIN_ENABLE_SEND=0` also turns it off.
+- **The relay is yours to run.** Anything that can poll `/api/pending` and show two buttons that send a `POST` works. [ntfy](https://ntfy.sh)'s `http` actions do; plain link buttons (Telegram, Pushover, Discord) open a `GET`, which the approval routes refuse on purpose (a built-in notifier with a confirm page is on the roadmap). Without `RELAY_BEARER` the tool isn't offered at all, because nobody could approve it. `MERLIN_ENABLE_SEND=0` also turns it off.
 - **Limits.** Recipients must be people you already have a Merlin conversation with. Plain text, at most 1800 characters. At most 10 sends per Zagreb day (a failed send gives its slot back) and 5 undecided requests at once. Each link works once, needs `POST` (so link previews can't approve), and expires after 30 minutes.
 - **Why.** Merlin messages and forum posts are untrusted input. A prompt injection in one of them must not be able to make the agent send anything.
 
@@ -103,7 +105,8 @@ docker build -t merlin-mcp .
 docker run --env-file merlin.env -p 8787:8787 -v merlin-data:/data merlin-mcp
 ```
 
-- **stdio is always read-only:** it never offers `moodle_send_message`.
+- **stdio is always read-only:** it never offers `moodle_send_message` and creates no database file.
+- **Listening address:** the Node server listens on `127.0.0.1` only unless you set `HOST` (the Docker image sets `HOST=0.0.0.0`). `GET /healthz` answers without auth and without calling Moodle, for health checks.
 - **Reachability:** a server on your LAN or tailnet works for CLI agents. claude.ai and ChatGPT connect from their own clouds and need a public HTTPS URL plus OAuth, which this server doesn't have yet. Behind a reverse proxy, set `MERLIN_PUBLIC_URL` so approval links use the public address.
 
 After a deploy, check: `moodle_whoami` answers for each year, `tools/list` returns the tools, and `/api/call?wsfunction=core_webservice_get_site_info` works with the API bearer and fails (401) with the MCP bearer.
@@ -128,7 +131,7 @@ where the script prints `{"Authorization": "Bearer <MCP_BEARER>"}`.
 
 - If Merlin's admins disable a function, the tool that uses it returns an error.
 - Moodle errors come back as tool errors or 502s, with the token redacted.
-- The Worker still declares an empty `MerlinMCP` Durable Object class from before 0.4, so rollbacks keep working. It will be removed with a `deleted_classes` migration.
+- `wrangler.toml` declares an empty `MerlinMCP` Durable Object class. It is unused (left over from before 0.4) and will be removed with a `deleted_classes` migration.
 
 ## Licence
 

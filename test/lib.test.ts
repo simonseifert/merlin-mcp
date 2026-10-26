@@ -491,14 +491,14 @@ describe('fanOut / merge helpers', () => {
 
 describe('moodleUserAgent', () => {
 	it('is fixed and names no one by default', () => {
-		expect(moodleUserAgent()).toBe('merlin-mcp/1.0 (personal read-only student client)');
+		expect(moodleUserAgent()).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
 	});
 	it('adds a valid contact address', () => {
-		expect(moodleUserAgent(' a@b.hr ')).toBe('merlin-mcp/1.0 (personal read-only student client; contact: a@b.hr)');
+		expect(moodleUserAgent(' a@b.hr ')).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: a@b.hr)');
 	});
 	it('drops anything that is not a plain address (no header injection)', () => {
-		expect(moodleUserAgent('a@b.hr\r\nX-Evil: 1')).toBe('merlin-mcp/1.0 (personal read-only student client)');
-		expect(moodleUserAgent('Mozilla/5.0 (x)')).toBe('merlin-mcp/1.0 (personal read-only student client)');
+		expect(moodleUserAgent('a@b.hr\r\nX-Evil: 1')).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
+		expect(moodleUserAgent('Mozilla/5.0 (x)')).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
 	});
 });
 

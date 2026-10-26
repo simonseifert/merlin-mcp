@@ -21,13 +21,15 @@
  * with `year`; tools that take an id resolve which year it belongs to. See
  * activeYears() in lib.ts and README.md.
  *
- * See AUDIT.md for the security review this file was rewritten against.
+ * SECURITY.md describes the threat model this file is written against.
  */
 
-import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { McpServer, type ToolCallback } from '@modelcontextprotocol/sdk/server/mcp.js';
+import type { ZodRawShapeCompat } from '@modelcontextprotocol/sdk/server/zod-compat.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
 import {
+	VERSION,
 	activeYears,
 	allTokens,
 	clamp,
@@ -191,13 +193,18 @@ async function moodleCall<T = unknown>(
 	if (!res.ok) {
 		throw new Error(`Moodle HTTP ${res.status}: ${redactSecret(truncate(bodyText, 500), secrets)}`);
 	}
-	let json: (T & { exception?: string; message?: string }) | undefined;
+	let json: (T & { exception?: string; message?: string; errorcode?: string }) | undefined;
 	try {
 		json = JSON.parse(bodyText);
 	} catch {
 		throw new Error(`Moodle returned a non-JSON response (HTTP ${res.status})`);
 	}
 	if (json && typeof json === 'object' && 'exception' in json && json.exception) {
+		if ((json as { errorcode?: string }).errorcode === 'invalidtoken') {
+			throw new Error(
+				'Moodle rejected the token (invalidtoken): it has expired or was revoked, or it belongs to another academic year. Get a fresh token (README, "Getting your token") and update MOODLE_TOKEN, or MOODLE_TOKENS for that year.'
+			);
+		}
 		throw new Error(`Moodle error: ${redactSecret(String(json.message ?? json.exception), secrets)}`);
 	}
 	return json as T;
@@ -526,7 +533,7 @@ export async function requestSend(
 		expires_local: zagrebTime(item.expires / 1000),
 		message: `Pending: nothing has been sent. The account owner gets a phone notification with the recipient and full text and must tap Send within ${
 			PENDING_TTL_MS / 60_000
-		} minutes. Tell him it is waiting for his approval on the phone; do not retry. Check moodle_get_messages later to see whether it went out.`,
+		} minutes. Tell the user it is waiting for their approval on the phone; do not retry. Check moodle_get_messages later to see whether it went out.`,
 	};
 }
 
@@ -600,9 +607,13 @@ async function handlePending(env: Env, origin: string): Promise<Response> {
 /** Registers every tool on a fresh server. Stateless: one server per /mcp request (or per stdio process). */
 export function registerTools(server: McpServer, getEnv: () => Env): void {
 	const env = getEnv;
+	// Every tool except moodle_send_message only reads, so clients can run them without a confirm prompt.
+	const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
+	const readTool = <A extends ZodRawShapeCompat>(name: string, description: string, shape: A, cb: ToolCallback<A>) =>
+		server.tool(name, description, shape, READ_ONLY, cb);
 
 	// 1. Notifications (popup messages Merlin shows in the bell icon)
-	server.tool(
+	readTool(
 		'moodle_get_notifications',
 		'Get recent Merlin notifications (assignment posted, quiz graded, forum posts, etc.) from every active academic year, merged newest first and tagged with `year`. Use `unread_only=true` for the freshest ones.',
 		{
@@ -624,7 +635,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 2. Calendar events: the actual class schedule / deadlines
-	server.tool(
+	readTool(
 		'moodle_get_calendar_events',
 		'Get calendar events (class sessions, deadlines, exams) in a window from now, across ALL enrolled courses of every active academic year, sorted by start time and tagged with `year`. Use this to detect schedule changes.',
 		{
@@ -681,7 +692,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 3. Enrolled courses
-	server.tool(
+	readTool(
 		'moodle_get_courses',
 		'List courses the current user is enrolled in, in every active academic year (tagged with `year`; course ids are only unique within a year).',
 		{ year: listYearParam },
@@ -702,7 +713,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 4. Course contents: sections, announcements, resources
-	server.tool(
+	readTool(
 		'moodle_get_course_contents',
 		'Get the content tree of a specific course: sections, modules (forums, assignments, files), and section descriptions (HTML stripped). Use after moodle_get_courses to inspect what changed in a course.',
 		{
@@ -717,7 +728,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 5. Recent forum posts: catches announcements that don't trigger popup notifications
-	server.tool(
+	readTool(
 		'moodle_get_recent_forum_posts',
 		'Get recent discussions from a forum (e.g. a course announcements forum). Useful for catching schedule changes professors post that may not trigger a notification.',
 		{
@@ -752,7 +763,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 6. Site info / self: for debugging auth
-	server.tool(
+	readTool(
 		'moodle_whoami',
 		'Return info about the authenticated Moodle user, one entry per active academic year (useful for verifying the token works on each site).',
 		{ year: listYearParam },
@@ -769,7 +780,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 6b. Private messages (read)
-	server.tool(
+	readTool(
 		'moodle_get_messages',
 		'List Merlin private-message conversations from every active academic year (who, unread count, latest messages; tagged with `year`), or the full thread of one conversation. A DM lives in one year\'s site only, so reply in the `year` shown. Use this to read DMs and to find the user id to reply to.',
 		{
@@ -866,10 +877,6 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 			{
 				to_user_id: z.number().int().positive().describe('Moodle user id of the recipient'),
 				text: z.string().min(1).max(1800).describe('Plain-text message, exactly as the owner wants it sent (max 1800 characters so the whole text fits in the phone notification)'),
-				approved_by_simon: z
-					.boolean()
-					.optional()
-					.describe('Deprecated and ignored: approval now happens on the owner\'s phone, not in this call'),
 				year: idYearParam,
 			},
 			{ title: 'Request a Merlin message (the owner approves on their phone)', readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
@@ -878,7 +885,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	}
 
 	// 7. Grades
-	server.tool(
+	readTool(
 		'moodle_get_grades',
 		'Get grade items (scores, percentages, grader feedback) for one course, or for every enrolled course in every active academic year (tagged with `year`). HTML stripped from feedback text.',
 		{
@@ -917,6 +924,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 							})),
 						} as Record<string, unknown>;
 					} catch (err) {
+						if (err instanceof RateLimitError) throw err; // the brake must stop the whole call, not become 30 per-course errors
 						return { courseid: cid, error: String(err) } as Record<string, unknown>;
 					}
 				});
@@ -926,7 +934,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 8. Upcoming deadlines
-	server.tool(
+	readTool(
 		'moodle_get_upcoming_deadlines',
 		'Get upcoming action-required events (assignment due dates, quiz closes, etc.) across all courses of every active academic year, sorted by time and tagged with `year`.',
 		{
@@ -964,12 +972,12 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 9. Assignments (+ submission status / grader feedback)
-	server.tool(
+	readTool(
 		'moodle_get_assignments',
 		'List assignments (optionally scoped to courses) in every active academic year with due dates (tagged with `year`), and by default the submission status and grader feedback for the 30 most recently due.',
 		{
 			course_ids: z.array(z.number().int()).optional().describe('Limit to these course IDs; omit for every enrolled course'),
-			include_feedback: z.boolean().default(true).describe('Also fetch submission status + grader comments per assignment'),
+			include_feedback: z.boolean().default(false).describe('Also fetch submission status + grader comments per assignment. Off by default: each one logs a "feedback viewed" event that the course teachers can see, so only ask for it when the user wants their feedback'),
 			year: listYearParam,
 		},
 		async ({ course_ids, include_feedback, year }) => {
@@ -1039,7 +1047,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 10. Quiz attempts
-	server.tool(
+	readTool(
 		'moodle_get_quiz_attempts',
 		"List a user's attempts at a quiz (state, timing, overall grade).",
 		{
@@ -1068,7 +1076,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 11. Quiz attempt review: per-question marks/feedback
-	server.tool(
+	readTool(
 		'moodle_get_quiz_attempt_review',
 		'Get the per-question review (marks, correctness, feedback) for one finished quiz attempt. HTML stripped from question/feedback text.',
 		{
@@ -1103,7 +1111,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 12. Forum discussion: full thread text
-	server.tool(
+	readTool(
 		'moodle_get_forum_discussion',
 		'Get the full text of every post in one forum discussion thread. HTML stripped.',
 		{
@@ -1133,7 +1141,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 13. Cheap change detection
-	server.tool(
+	readTool(
 		'moodle_get_updates_since',
 		'Cheap change detection: list what changed in a course since N hours ago, without re-fetching the whole content tree.',
 		{
@@ -1150,7 +1158,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 	);
 
 	// 14. Walk course contents for downloadable files
-	server.tool(
+	readTool(
 		'moodle_list_files',
 		"Walk a course's content tree and list every file with its name, size, modified time, and a ready-to-use /api/file download URL (relative to this worker).",
 		{
@@ -1166,7 +1174,7 @@ export function registerTools(server: McpServer, getEnv: () => Env): void {
 }
 
 export function createServer(env: Env): McpServer {
-	const server = new McpServer({ name: 'merlin-mcp', version: '0.4.0' });
+	const server = new McpServer({ name: 'merlin-mcp', version: VERSION });
 	registerTools(server, () => env);
 	return server;
 }
@@ -1212,6 +1220,9 @@ function errorResponse(err: unknown, env: Env): Response {
 
 export async function handle(request: Request, env: Env): Promise<Response> {
 	const url = new URL(request.url);
+
+	// Liveness only: no auth, no Moodle call, nothing about the account.
+	if (url.pathname === '/healthz') return jsonResponse({ ok: true, name: 'merlin-mcp', version: VERSION });
 
 	// Approval buttons: no bearer, the unguessable per-item key is the credential.
 	const decision = /^\/api\/(approve|reject)\/([0-9a-f]{16})$/.exec(url.pathname);
@@ -1313,6 +1324,11 @@ export async function handle(request: Request, env: Env): Promise<Response> {
 		// Only our token goes out: drop anything the caller put in the auth slots.
 		for (const k of ['token', 'wstoken', 'wsfunction']) fileUrl.searchParams.delete(k);
 		fileUrl.searchParams.set('token', tokenForYear(env, fileYear ?? currentYear(env)));
+		try {
+			rateCheck(Date.now()); // downloads count against the same brake as API calls
+		} catch (err) {
+			return errorResponse(err, env);
+		}
 		let res: Response;
 		try {
 			res = await fetch(fileUrl.toString(), { redirect: 'manual', headers: { 'User-Agent': moodleUserAgent(env.MOODLE_CONTACT) } });

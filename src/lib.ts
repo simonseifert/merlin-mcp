@@ -375,10 +375,13 @@ export const RESERVED_MOODLE_PARAMS = new Set(['wstoken', 'wsfunction', 'moodlew
  * only the contact address is configurable (secret MOODLE_CONTACT), never the rest,
  * and it is never browser-like.
  */
+/** Released version (keep in sync with package.json). Sent in the User-Agent and /healthz. */
+export const VERSION = '0.4.1';
+
 export function moodleUserAgent(contact?: string): string {
 	const c = (contact ?? '').trim();
 	const safe = /^[^\s()@]+@[^\s()@]+\.[^\s()@]+$/.test(c) ? `; contact: ${c}` : '';
-	return `merlin-mcp/1.0 (personal read-only student client${safe})`;
+	return `merlin-mcp/${VERSION} (+https://github.com/simonseifert/merlin-mcp; personal read-only student client${safe})`;
 }
 
 /**

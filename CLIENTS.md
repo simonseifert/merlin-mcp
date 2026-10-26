@@ -4,23 +4,26 @@
 
 Conventions: replace `<your-worker>` with your worker host (for example `merlin-mcp.<subdomain>.workers.dev`). Keep the bearer in an environment variable named `MERLIN_MCP_BEARER` and never commit its value. Only the MCP bearer opens `/mcp`; the API bearer is rejected there.
 
-Verification status: Hermes and OpenClaw were checked against their live docs on 2026-10-23. Codex, Gemini and Cursor come from `research-2026-10-23-selfhost-compat.md` section 2 (Codex from a local docs brief, Gemini and Cursor from their docs as summarised there). Nothing was tested against the live worker. Anything marked "(unverified)" could not be confirmed.
+Verification status: Claude Code and Codex were checked against their documentation on 2026-10-26 and are in daily use. Hermes and OpenClaw were checked against their live docs on 2026-10-23. Gemini and Cursor come from their docs. Anything marked "(unverified)" could not be confirmed.
 
 ## Claude Code
 
-```bash
-claude mcp add --transport http merlin https://<your-worker>/mcp \
-  --header "Authorization: Bearer $MERLIN_MCP_BEARER"
-```
-
-The shell expands the variable, so the literal value is stored in `~/.claude.json` (user scope with `--scope user`). Check with `claude mcp list`. Equivalent config under `mcpServers` in `~/.claude.json`:
+Best: keep the bearer out of `~/.claude.json` entirely with a `headersHelper`, a command Claude Code runs at connect time that prints the headers as JSON. Put the full header value (`Bearer <MCP_BEARER>`) in a file only you can read (`chmod 600`), and point the helper at it:
 
 ```json
-"merlin": { "type": "http", "url": "https://<your-worker>/mcp",
-            "headers": { "Authorization": "Bearer <MCP_BEARER>" } }
+"merlin": {
+  "type": "http",
+  "url": "https://<your-worker>/mcp",
+  "headersHelper": "python3 -c \"import json,os;print(json.dumps({'Authorization':open(os.path.expanduser('~/.config/merlin-mcp/auth')).read().strip()}))\""
+}
 ```
 
-Known caveat: an open Claude Code issue (anthropics/claude-code#59467) says a server that also advertises OAuth can make the client ignore the header. Merlin has no OAuth today, so this does not apply.
+Now printing the config, or an agent reading it, shows no secret. Alternatives:
+
+- In a project `.mcp.json`, Claude Code expands variables in `url` and `headers`: `"headers": { "Authorization": "Bearer ${MERLIN_MCP_BEARER}" }`. The variable must be set in the environment Claude Code starts in.
+- `claude mcp add --transport http merlin https://<your-worker>/mcp --header "Authorization: Bearer $MERLIN_MCP_BEARER"` works, but the shell expands the variable, so the literal value ends up in `~/.claude.json`.
+
+Check with `claude mcp list`. The 15 read tools are annotated `readOnlyHint: true`; `moodle_send_message` is not, so Claude Code keeps asking before it.
 
 ## Codex CLI
 
@@ -30,9 +33,14 @@ Known caveat: an open Claude Code issue (anthropics/claude-code#59467) says a se
 [mcp_servers.merlin]
 url = "https://<your-worker>/mcp"
 bearer_token_env_var = "MERLIN_MCP_BEARER"
+# or, for any header: env_http_headers = { Authorization = "MERLIN_AUTH_HEADER" }  (value "Bearer ...")
+default_tools_approval_mode = "writes"   # read-only tools run without asking, the send still prompts
+
+[mcp_servers.merlin.tools.moodle_send_message]
+approval_mode = "prompt"
 ```
 
-The variable must be set in the environment Codex starts in. For non-interactive `codex exec` you may also need `default_tools_approval_mode = "approve"` on the server entry (from the local Codex docs brief). Leave sends on the default approval mode: `moodle_send_message` should still ask.
+The variable must be set in the environment Codex starts in. Don't set `default_tools_approval_mode = "approve"` on this server: it auto-approves every tool, the send request included (that only creates a pending send, but you lose the in-chat check).
 
 ## Gemini CLI
 

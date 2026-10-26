@@ -3,7 +3,7 @@
  *
  * The MCP tool never sends. It stores a *pending send* here and returns its
  * id. A relay (on the owner's own machine) polls GET /api/pending (its own
- * RELAY_BEARER, never the MCP bearer) and posts an ntfy notification to his
+ * RELAY_BEARER, never the MCP bearer) and posts a notification to the owner's
  * phone with "Send" / "Reject" buttons. Those buttons POST to
  * /api/approve/<id>?k=<key> or /api/reject/<id>?k=<key>, and only then does
  * the worker send the stored text, exactly as stored. The per-item key is

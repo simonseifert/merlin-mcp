@@ -6,7 +6,7 @@ import { __resetCaches, MAX_CALLS_PER_MIN } from '../src/app.js';
 // sandbox) for every route except /mcp and /sse, which delegate to the
 // MerlinMCP Durable Object via `env.MCP_OBJECT`: that binding only exists in
 // a real Workers runtime, so DO-backed routing is verified live in
-// production instead (see the deploy checklist in AUDIT.md/README.md).
+// production instead (see the deploy check in README.md).
 //
 // Outbound calls to Moodle go through the global `fetch`, which is stubbed
 // per test below.
@@ -318,7 +318,7 @@ describe('/api/call allow-list', () => {
 		expect(init.method).toBe('POST');
 		expect(new URL(url).searchParams.has('wstoken')).toBe(false);
 		expect(url).not.toContain('the-moodle-token');
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/1.0 (personal read-only student client)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
 	});
 
 	it('puts the MOODLE_CONTACT address in the User-Agent when it is set', async () => {
@@ -326,7 +326,7 @@ describe('/api/call allow-list', () => {
 		const env = { ...ENV, MOODLE_CONTACT: 'ops@example.org' };
 		await worker.fetch(new Request('https://merlin-mcp.example/api/call?wsfunction=core_enrol_get_users_courses', { headers: AUTH }), env, fakeCtx());
 		const init = fetchMock.mock.calls[0][1] as RequestInit;
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/1.0 (personal read-only student client; contact: ops@example.org)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.4.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: ops@example.org)');
 	});
 
 	it('never returns userprivateaccesskey through /api/call', async () => {
@@ -360,6 +360,24 @@ describe('/api/call allow-list', () => {
 		await worker.fetch(req, ENV, fakeCtx());
 		const calledUrl = new URL(fetchMock.mock.calls[0][0] as string);
 		expect(calledUrl.origin + calledUrl.pathname).toContain('/2020-2021/webservice/rest/server.php');
+	});
+});
+
+describe('/healthz and invalidtoken', () => {
+	it('/healthz answers without auth and without calling Moodle', async () => {
+		const res = await worker.fetch(new Request('https://merlin-mcp.example/healthz'), ENV, fakeCtx());
+		expect(res.status).toBe(200);
+		expect(((await res.json()) as any).ok).toBe(true);
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('turns Moodle invalidtoken into a clear, token-free message', async () => {
+		fetchMock.mockResolvedValueOnce(jsonResponse({ exception: 'moodle_exception', errorcode: 'invalidtoken', message: 'Invalid token - token not found' }));
+		const res = await worker.fetch(new Request('https://merlin-mcp.example/api/call?wsfunction=core_webservice_get_site_info', { headers: AUTH }), ENV, fakeCtx());
+		const text = await res.text();
+		expect(res.status).toBe(502);
+		expect(text).toContain('Getting your token');
+		expect(text).not.toContain('the-moodle-token');
 	});
 });
 
@@ -466,6 +484,14 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 		const names = body.result.tools.map((t: { name: string }) => t.name);
 		expect(names).toHaveLength(15);
 		expect(names).not.toContain('moodle_send_message');
+	});
+
+	it('every tool except the send is annotated read-only', async () => {
+		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay' }, fakeCtx())).json()) as any;
+		for (const t of body.result.tools) {
+			if (t.name === 'moodle_send_message') expect(t.annotations.readOnlyHint).toBe(false);
+			else expect(t.annotations?.readOnlyHint).toBe(true);
+		}
 	});
 
 	it('MERLIN_ENABLE_SEND="0" leaves the send tool out', async () => {
