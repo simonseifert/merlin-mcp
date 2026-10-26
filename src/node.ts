@@ -99,8 +99,13 @@ function toRequest(req: IncomingMessage, base: string): Request {
 	const hasBody = req.method !== 'GET' && req.method !== 'HEAD';
 	// Take only path + query from the request line: an absolute-form target ("GET http://evil.example/... HTTP/1.1")
 	// must not replace the trusted base, or approval links would point elsewhere.
+	// The host can only ever come from the trusted base: copy path and query onto it, never parse them as a URL
+	// (a path like "//evil.example/x" would otherwise read as a protocol-relative address).
 	const target = new URL(req.url ?? '/', 'http://placeholder.invalid');
-	return new Request(new URL(target.pathname + target.search, base), {
+	const url = new URL(base);
+	url.pathname = target.pathname;
+	url.search = target.search;
+	return new Request(url, {
 		method: req.method,
 		headers,
 		body: hasBody ? (Readable.toWeb(req) as ReadableStream) : undefined,

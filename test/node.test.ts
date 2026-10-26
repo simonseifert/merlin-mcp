@@ -60,7 +60,10 @@ describe('Node: SQLite approval store', () => {
 		});
 		const body = await get('/api/pending');
 		const absolute = await get('http://evil.example/api/pending'); // absolute-form request target
+		const slashes = await get('//evil.example/api/pending'); // protocol-relative path
+		const dotted = await get('/.//evil.example/api/pending'); // normalises to //evil.example/...
 		server.close();
+		for (const r of [slashes, dotted]) expect(r).not.toContain('evil.example');
 		expect(absolute).not.toContain('evil.example');
 		expect(absolute).toContain(`http://localhost:${port}/api/approve/`);
 		expect(body).not.toContain('evil.example');
