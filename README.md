@@ -81,7 +81,22 @@ your phone ─► POST /api/approve/<id>?k=<key>  ─► the server sends exactl
 
 ## Getting your token
 
-The server needs a Moodle web-service token for your account. On Merlin you sign in through AAI@EduHr, so `login/token.php` with a password doesn't work. Use the mobile-app sign-in that Moodle documents (`admin/tool/mobile/launch.php`, [source](https://github.com/moodle/moodle/blob/v5.2.2/public/admin/tool/mobile/launch.php)), the same flow the MerlinMobile app uses. Things to know:
+The server needs a Moodle web-service token for your account. On Merlin you sign in through AAI@EduHr, so `login/token.php` with a password doesn't work. Use the mobile-app sign-in that Moodle documents (`admin/tool/mobile/launch.php`, [source](https://github.com/moodle/moodle/blob/v5.2.2/public/admin/tool/mobile/launch.php)), the same flow the MerlinMobile app uses. You sign in yourself, in your own browser; nothing here sees your AAI password.
+
+1. **Make the link.** `node scripts/get-token.mjs link --year 2026-2027` (use the academic year you need). It prints a `launch.php` link.
+2. **Open it and sign in.** In Firefox, open DevTools first (F12, Network tab, tick "Persist logs"); in Chrome, tick "Preserve log". Open the link and sign in with AAI@EduHr if asked.
+3. **Copy the answer.** At the end Moodle redirects to an address starting `merlin-token://token=` (it may use another name, such as `moodlemobile://`, if the site forces one). The browser can't open it: Firefox shows it in an error page, otherwise find the `launch.php` request in the Network tab and copy its `Location` header.
+4. **Save it.** `node scripts/get-token.mjs save '<that whole address>' --year 2026-2027`. It checks the answer matches your link and writes `MOODLE_TOKEN` into `merlin.env` (readable only by you, and gitignored). It never prints the token unless you add `--print`, and it drops the second "private token" Moodle sends along.
+5. **Check it.** Start the server and call `moodle_whoami`: it should show your name for every year you use.
+
+| Problem | What to do |
+|---|---|
+| No `...token=` address appears anywhere | Log in to Merlin in that browser first, then open the link again in the same browser. |
+| "Warning: this answer does not match the last link" | You copied an answer from an older link or another year. Make a new link and repeat. |
+| `invalidtoken` later | The token expired or was reset. Repeat these steps. |
+| Works for one year only | Make a token per year and set `MOODLE_TOKENS` (see "Multiple years"). |
+
+Things to know:
 
 - **It's the same token the official app uses.** Moodle hands back your existing token, so every client shares one. If it's ever reset, all of them stop working at once.
 - **Treat it like a password.** Students usually can't revoke their own token on Merlin, so a leaked one stays valid until it expires or SRCE revokes it. Never commit it, paste it in chats, or put it in a shared server.

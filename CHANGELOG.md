@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- `scripts/get-token.mjs` and a step-by-step "Getting your token" guide in the README.
+- Tests for every MCP tool through `/mcp`, plus a guard that fails if any tool sends a Moodle function that isn't a plain read (222 tests).
+- A fake Merlin for demos and local development (`examples/`), a docker-compose file, a Mermaid architecture diagram and a demo GIF in the README.
+
 ## 0.4.1 (2026-10-26)
 
 First tagged release.
