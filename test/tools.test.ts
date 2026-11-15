@@ -755,13 +755,20 @@ describe('moodle_get_all_updates_since', () => {
 		expect(c20.changes[0]).toMatchObject({ cmid: 101, name: 'Slides', files: ['slides.pdf'] });
 		expect(data.errors).toBeUndefined();
 	});
+
+	it('lists partial courses with no file changes once instead of as empty items', async () => {
+		overrides.core_course_get_updates_since = () => ({ exception: 'dml_read_exception', message: 'Pogreška pri čitanju iz baze podataka' });
+		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 10 });
+		expect(data.items).toEqual([]);
+		expect(data.not_fully_checked).toEqual(['Test Course 101 (2026-2027)', 'Test Course 202 (2026-2027)']);
+	});
 });
 
 describe('moodle_get_upcoming_deadlines quiz context', () => {
 	it('adds time limit and attempts left to quiz items', async () => {
 		overrides.core_calendar_get_action_events_by_timesort = () => ({
 			events: [
-				{ id: 9, name: 'Samoprovjera closes', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'quiz', instance: 3, timesort: 9500, url: 'https://x' },
+				{ id: 9, name: 'Samoprovjera closes', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'quiz', instance: 300, timesort: 9500, url: 'https://x' },
 				{ id: 8, name: 'Essay due', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'assign', instance: 5, timesort: 9000, url: 'https://x' },
 			],
 		});

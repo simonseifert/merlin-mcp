@@ -1101,7 +1101,12 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				const events = data.events ?? [];
 				// Quiz items get the quiz's time limit and attempts left (settings + attempt list only).
 				const quizzes = events.some((e) => e.modulename === 'quiz') ? await getQuizzes(env(), y).catch(() => [] as Quiz[]) : [];
-				const quizById = new Map(quizzes.map((q) => [q.id, q]));
+				// The event's `instance` is the quiz id on some sites and the cmid on Merlin: match either.
+				const quizById = new Map<number, Quiz>();
+				for (const q of quizzes) {
+					quizById.set(q.id, q);
+					if (q.coursemodule) quizById.set(Number(q.coursemodule), q);
+				}
 				return mapLimit(events, 4, async (e) => {
 					const course = e.course as Record<string, unknown> | undefined;
 					const q = e.modulename === 'quiz' ? quizById.get(Number(e.instance)) : undefined;
@@ -1594,7 +1599,16 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				});
 				return perCourse.flat();
 			});
-			return toToolResult({ ...listResult(fan, fan.items), since, since_local: zagrebTime(since) });
+			// Partial courses with no changed files carry no information beyond "couldn't check": list them once.
+			const isEmptyPartial = (c: { changes: unknown[] }) => 'partial' in c && !c.changes.length;
+			const partialOnly = fan.items.filter(isEmptyPartial);
+			const items = fan.items.filter((c) => !isEmptyPartial(c));
+			const result: Record<string, unknown> = { ...listResult(fan, items), since, since_local: zagrebTime(since) };
+			if (partialOnly.length) {
+				result.not_fully_checked = partialOnly.map((c) => `${c.course} (${c.year})`);
+				result.not_fully_checked_note = 'Merlin could not list updates for these courses and none of their files changed; other edits (new forum posts, quizzes) may be missing. Use moodle_get_new_forum_posts for announcements.';
+			}
+			return toToolResult(result);
 		}
 	);
 
