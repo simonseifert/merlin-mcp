@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- `moodle_get_quiz_details`: quiz rules without starting an attempt (open/close, time limit, attempts allowed, used and left, grading method, max grade).
+- `moodle_get_my_groups`: your groups per course. Groupings are left out: Moodle only shows them to teachers.
+- `moodle_get_new_forum_posts`: new discussions across every course since a time (announcement forums by default), through the same non-marking discussion list as `moodle_get_recent_forum_posts`.
+- `moodle_get_choices`: sign-ups and polls with options, fill level and your pick. Read-only.
+- `moodle_get_all_updates_since`: changes in every course in one call, with activity names. Merlin's `core_course_get_updates_since` fails with a database error on about half the courses (both years, 16 Nov 2026); those are marked `partial` and show new or changed files from the content tree instead.
+- `moodle_get_upcoming_deadlines`: quiz items carry the time limit and attempts left.
+- Not built: attendance (`mod_attendance` is not in Merlin's mobile service).
 - `moodle_read_file`: the text of one course file (PDF page by page via unpdf, plain text, Markdown, CSV, JSON, HTML), with a page range, a character cap and a 30 MB limit. It shares `/api/file`'s checks (Moodle file URLs only, server-side token, no redirects, no error pages).
 
 ## 0.4.2 (2026-11-15)

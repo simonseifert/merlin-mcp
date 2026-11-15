@@ -262,12 +262,81 @@ function getForumIds(env: Env, year: string): Promise<Set<number>> {
 	});
 }
 
-function getQuizIds(env: Env, year: string): Promise<Set<number>> {
-	return cached(`quizzes:${year}`, TEN_MIN, async () => {
-		const data = await moodleCall<{ quizzes?: Array<{ id: number }> }>(env, 'mod_quiz_get_quizzes_by_courses', {}, year);
-		return new Set((data.quizzes ?? []).map((q) => q.id));
+type Quiz = Record<string, unknown> & { id: number; course: number; coursemodule?: number; name?: string };
+
+/** Every quiz the user can see in a year (settings only; no attempt is started or touched). */
+function getQuizzes(env: Env, year: string): Promise<Quiz[]> {
+	return cached(`quizlist:${year}`, 5 * 60_000, async () => {
+		const data = await moodleCall<{ quizzes?: Quiz[] }>(env, 'mod_quiz_get_quizzes_by_courses', {}, year);
+		return data.quizzes ?? [];
 	});
 }
+
+function getQuizIds(env: Env, year: string): Promise<Set<number>> {
+	return getQuizzes(env, year).then((qs) => new Set(qs.map((q) => q.id)));
+}
+
+const GRADE_METHODS: Record<number, string> = { 1: 'highest', 2: 'average', 3: 'first', 4: 'last' };
+
+/**
+ * A quiz's rules plus how many attempts the user has used. Reads
+ * mod_quiz_get_user_attempts (status "all", so an unfinished attempt counts);
+ * it never starts, continues or views an attempt.
+ */
+async function quizInfo(env: Env, year: string, q: Quiz, withAttempts: boolean): Promise<Record<string, unknown>> {
+	const allowed = Number(q.attempts ?? 0);
+	const out: Record<string, unknown> = {
+		quiz_id: q.id,
+		cmid: q.coursemodule,
+		courseid: q.course,
+		name: q.name,
+		timeopen: q.timeopen || undefined,
+		timeopen_local: zagrebTime(q.timeopen),
+		timeclose: q.timeclose || undefined,
+		timeclose_local: zagrebTime(q.timeclose),
+		time_limit_minutes: Number(q.timelimit) > 0 ? Math.round(Number(q.timelimit) / 6) / 10 : null,
+		attempts_allowed: allowed > 0 ? allowed : 'unlimited',
+		grading_method: GRADE_METHODS[Number(q.grademethod)] ?? q.grademethod,
+		max_grade: q.grade,
+	};
+	if (withAttempts) {
+		try {
+			const data = await moodleCall<{ attempts?: Array<Record<string, unknown>> }>(env, 'mod_quiz_get_user_attempts', { quizid: q.id, status: 'all' }, year);
+			const attempts = data.attempts ?? [];
+			out.attempts_used = attempts.length;
+			out.attempt_in_progress = attempts.some((a) => a.state === 'inprogress' || a.state === 'overdue') || undefined;
+			out.attempts_left = allowed > 0 ? Math.max(0, allowed - attempts.length) : 'unlimited';
+		} catch (err) {
+			out.attempts_error = String(err instanceof Error ? err.message : err);
+		}
+	}
+	return out;
+}
+
+type ModInfo = { name?: string; modname?: string; section?: string; files: Array<{ filename?: string; timemodified: number }> };
+
+/** cmid -> name, type, section and file times for a course, from its content tree (cached). */
+function getModuleIndex(env: Env, year: string, courseId: number): Promise<Map<number, ModInfo>> {
+	return cached(`modidx:${year}:${courseId}`, TEN_MIN, async () => {
+		const raw = await moodleCall<Array<Record<string, unknown>>>(env, 'core_course_get_contents', { courseid: courseId }, year);
+		const idx = new Map<number, ModInfo>();
+		for (const sec of raw ?? []) {
+			for (const m of (sec.modules as Array<Record<string, unknown>> | undefined) ?? []) {
+				const files = ((m.contents as Array<Record<string, unknown>> | undefined) ?? [])
+					.filter((f) => f.type === 'file')
+					.map((f) => ({ filename: f.filename as string | undefined, timemodified: Number(f.timemodified) || 0 }));
+				idx.set(Number(m.id), { name: m.name as string, modname: m.modname as string, section: sec.name as string, files });
+			}
+		}
+		return idx;
+	});
+}
+
+const sinceParams = {
+	hours_ago: z.number().min(0.1).max(24 * 90).default(72).describe('Look back this many hours (ignored when `since` is given)'),
+	since: z.number().int().positive().optional().describe('Unix timestamp (seconds); overrides hours_ago'),
+};
+const sinceFrom = (a: { hours_ago: number; since?: number }) => a.since ?? Math.floor(Date.now() / 1000) - Math.round(a.hours_ago * 3600);
 
 /** Active years (newest first). Next year is probed in September and only included if its site answers. */
 function getActiveYears(env: Env): Promise<string[]> {
@@ -1014,7 +1083,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 	// 8. Upcoming deadlines
 	readTool(
 		'moodle_get_upcoming_deadlines',
-		'Get upcoming action-required events (assignment due dates, quiz closes, etc.) across all courses of every active academic year, sorted by time and tagged with `year`.',
+		'Get upcoming action-required events (assignment due dates, quiz closes, etc.) across all courses of every active academic year, sorted by time and tagged with `year`. Quiz items include `quiz` with the time limit and attempts left (read from the quiz settings and attempt list; no attempt is started or viewed).',
 		{
 			days_ahead: z.number().int().min(1).max(365).default(30),
 			limit: z.number().int().min(1).max(50).default(30).describe('Max items (Moodle caps this at 50)'),
@@ -1029,8 +1098,24 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 					{ timesortfrom: now, timesortto: now + days_ahead * 86400, limitnum: limit },
 					y
 				);
-				return (data.events ?? []).map((e) => {
+				const events = data.events ?? [];
+				// Quiz items get the quiz's time limit and attempts left (settings + attempt list only).
+				const quizzes = events.some((e) => e.modulename === 'quiz') ? await getQuizzes(env(), y).catch(() => [] as Quiz[]) : [];
+				const quizById = new Map(quizzes.map((q) => [q.id, q]));
+				return mapLimit(events, 4, async (e) => {
 					const course = e.course as Record<string, unknown> | undefined;
+					const q = e.modulename === 'quiz' ? quizById.get(Number(e.instance)) : undefined;
+					let quiz: Record<string, unknown> | undefined;
+					if (q) {
+						const info = await quizInfo(env(), y, q, true);
+						quiz = {
+							quiz_id: q.id,
+							time_limit_minutes: info.time_limit_minutes,
+							attempts_allowed: info.attempts_allowed,
+							attempts_used: info.attempts_used,
+							attempts_left: info.attempts_left,
+						};
+					}
 					return {
 						id: e.id,
 						name: e.name,
@@ -1042,6 +1127,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 						url: e.url,
 						overdue: e.overdue,
 						description: typeof e.description === 'string' ? truncate(stripHtml(e.description), 500) : undefined,
+						quiz,
 					};
 				});
 			});
@@ -1286,6 +1372,232 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 			});
 		}
 	);
+	// 16. Quiz rules without starting an attempt
+	readTool(
+		'moodle_get_quiz_details',
+		"Quiz rules without starting anything: open and close time, time limit, attempts allowed, used and left, grading method and max grade, for every quiz in every active year (or filter by course or quiz). Reads the quiz settings and the user's attempt list only; it never starts, continues or views an attempt, and logs nothing teachers see.",
+		{
+			course_ids: z.array(z.number().int()).optional().describe('Only these course ids'),
+			quiz_id: z.number().int().optional().describe("Only this quiz (the module's `instance`, not the cmid)"),
+			only_open: z.boolean().default(false).describe('Only quizzes that are open now or open in the future'),
+			year: listYearParam,
+		},
+		async ({ course_ids, quiz_id, only_open, year }) => {
+			const now = Math.floor(Date.now() / 1000);
+			const fan = await fanOut(await yearsFor(env(), year), async (y) => {
+				const courses = new Map((await getCourses(env(), y)).map((c) => [c.id, c.fullname]));
+				let qs = await getQuizzes(env(), y);
+				if (quiz_id !== undefined) qs = qs.filter((q) => q.id === quiz_id);
+				if (course_ids?.length) qs = qs.filter((q) => course_ids.includes(Number(q.course)));
+				if (only_open) qs = qs.filter((q) => !Number(q.timeclose) || Number(q.timeclose) > now);
+				return mapLimit(qs, 6, async (q): Promise<Record<string, unknown>> => ({ course: courses.get(Number(q.course)), ...(await quizInfo(env(), y, q, true)) }));
+			});
+			return toToolResult(listResult(fan, sortByNumber(fan.items, (q) => q.timeclose, 'asc')));
+		}
+	);
+
+	// 17. The user's groups
+	readTool(
+		'moodle_get_my_groups',
+		"The groups the user is in, per course, in every active year (e.g. lab group G2). Groupings aren't included: Moodle only shows those to teachers. Read-only.",
+		{ year: listYearParam },
+		async ({ year }) => {
+			const fan = await fanOut(await yearsFor(env(), year), async (y) => {
+				const [userid, courses] = await Promise.all([getUserId(env(), y), getCourses(env(), y)]);
+				const names = new Map(courses.map((c) => [c.id, c.fullname]));
+				const data = await moodleCall<{ groups?: Array<Record<string, unknown>> }>(env(), 'core_group_get_course_user_groups', { courseid: 0, userid }, y);
+				return (data.groups ?? []).map((g) => ({
+					group_id: g.id,
+					name: g.name,
+					courseid: g.courseid,
+					course: names.get(Number(g.courseid)),
+					idnumber: g.idnumber || undefined,
+					description: typeof g.description === 'string' && g.description ? truncate(stripHtml(g.description), 300) : undefined,
+				}));
+			});
+			return toToolResult(listResult(fan, fan.items));
+		}
+	);
+
+	// 18. New forum posts across every course
+	readTool(
+		'moodle_get_new_forum_posts',
+		"New or updated forum discussions across every course since a time, newest first: by default only the announcement forums (Obavijesti). Uses the same discussion list as moodle_get_recent_forum_posts, which doesn't mark anything read; open a thread with moodle_get_forum_discussion (that one does mark its posts read).",
+		{
+			...sinceParams,
+			forums: z.enum(['announcements', 'all']).default('announcements').describe('"announcements" = news forums only; "all" = every forum'),
+			limit: z.number().int().min(1).max(100).default(40),
+			year: listYearParam,
+		},
+		async (args) => {
+			const since = sinceFrom(args);
+			const fan = await fanOut(await yearsFor(env(), args.year), async (y) => {
+				const [forums, courses] = await Promise.all([
+					moodleCall<Array<Record<string, unknown>>>(env(), 'mod_forum_get_forums_by_courses', {}, y),
+					getCourses(env(), y),
+				]);
+				const names = new Map(courses.map((c) => [c.id, c.fullname]));
+				const wanted = (forums ?? []).filter((f) => args.forums === 'all' || f.type === 'news');
+				const perForum = await mapLimit(wanted, 6, async (f) => {
+					const data = await moodleCall<{ discussions?: Array<Record<string, unknown>> }>(
+						env(),
+						'mod_forum_get_forum_discussions',
+						{ forumid: Number(f.id), sortorder: -1, page: 0, perpage: 15 },
+						y
+					);
+					return (data.discussions ?? [])
+						.filter((d) => Number(d.timemodified) >= since || Number(d.created) >= since)
+						.map((d) => ({
+							forum_id: f.id,
+							forum: f.name,
+							forum_type: f.type,
+							courseid: f.course,
+							course: names.get(Number(f.course)),
+							discussion: d.discussion,
+							subject: d.subject ?? d.name,
+							author: d.userfullname,
+							created: d.created,
+							created_local: zagrebTime(d.created),
+							timemodified: d.timemodified,
+							numreplies: d.numreplies,
+							message: typeof d.message === 'string' ? truncate(stripHtml(d.message), 1500) : undefined,
+						}));
+				});
+				return perForum.flat();
+			});
+			const items = sortByNumber(fan.items, (d) => d.timemodified, 'desc').slice(0, args.limit);
+			return toToolResult({ ...listResult(fan, items), since, since_local: zagrebTime(since) });
+		}
+	);
+
+	// 19. Sign-ups and choices
+	readTool(
+		'moodle_get_choices',
+		"Sign-ups and polls (Moodle Choice activities) in every active year: open and close time, whether they're open now, the options with how full each is, and which option the user picked. Read-only: it never answers or changes a choice and logs no view.",
+		{
+			include_closed: z.boolean().default(false).describe('Also list choices that already closed'),
+			year: listYearParam,
+		},
+		async ({ include_closed, year }) => {
+			const now = Math.floor(Date.now() / 1000);
+			const fan = await fanOut(await yearsFor(env(), year), async (y) => {
+				const [data, courses] = await Promise.all([
+					moodleCall<{ choices?: Array<Record<string, unknown>> }>(env(), 'mod_choice_get_choices_by_courses', {}, y),
+					getCourses(env(), y),
+				]);
+				const names = new Map(courses.map((c) => [c.id, c.fullname]));
+				const list = (data.choices ?? []).filter((c) => include_closed || !Number(c.timeclose) || Number(c.timeclose) > now);
+				return mapLimit(list, 6, async (c) => {
+					const open = (!Number(c.timeopen) || Number(c.timeopen) <= now) && (!Number(c.timeclose) || Number(c.timeclose) > now);
+					const entry: Record<string, unknown> = {
+						choice_id: c.id,
+						cmid: c.coursemodule,
+						courseid: c.course,
+						course: names.get(Number(c.course)),
+						name: c.name,
+						intro: typeof c.intro === 'string' && c.intro ? truncate(stripHtml(c.intro), 800) : undefined,
+						timeopen_local: zagrebTime(c.timeopen),
+						timeclose: c.timeclose || undefined,
+						timeclose_local: zagrebTime(c.timeclose),
+						open_now: open,
+						can_change_answer: Boolean(c.allowupdate),
+						multiple_answers: Boolean(c.allowmultiple),
+					};
+					try {
+						const opts = await moodleCall<{ options?: Array<Record<string, unknown>> }>(env(), 'mod_choice_get_choice_options', { choiceid: Number(c.id) }, y);
+						entry.options = (opts.options ?? []).map((o) => ({
+							text: typeof o.text === 'string' ? stripHtml(o.text) : o.text,
+							taken: o.countanswers,
+							max: Number(o.maxanswers) > 0 ? o.maxanswers : undefined,
+							full: Boolean(o.disabled) && !o.checked ? true : undefined,
+						}));
+						entry.my_pick = (opts.options ?? []).filter((o) => o.checked).map((o) => (typeof o.text === 'string' ? stripHtml(o.text) : o.text));
+						if (!(opts.options ?? []).length && !open) {
+							// Moodle hides the options of a choice that isn't open (no preview), so the pick is unknown here.
+							delete entry.my_pick;
+							entry.note = 'Not open now: Merlin does not show its options or your answer through the app API.';
+						}
+					} catch (err) {
+						entry.options_error = String(err instanceof Error ? err.message : err);
+					}
+					return entry;
+				});
+			});
+			return toToolResult(listResult(fan, sortByNumber(fan.items, (c) => c.timeclose, 'asc')));
+		}
+	);
+
+	// 20. What changed, across every course
+	readTool(
+		'moodle_get_all_updates_since',
+		'What changed in every enrolled course since a time, in one call: per course, each changed activity with its name, type and section, and what changed (e.g. configuration, contentfiles, posts). Courses where Merlin can\'t list updates are marked `partial` and show only new or changed files. Courses with nothing new are left out. Read-only; nothing is marked viewed.',
+		{
+			...sinceParams,
+			hours_ago: z.number().min(0.1).max(24 * 90).default(24).describe('Look back this many hours (ignored when `since` is given)'),
+			year: listYearParam,
+		},
+		async (args) => {
+			const since = sinceFrom(args);
+			const fan = await fanOut(await yearsFor(env(), args.year), async (y) => {
+				const courses = await getCourses(env(), y);
+				const perCourse = await mapLimit(courses, 6, async (c) => {
+					const emptyIdx = () => new Map<number, ModInfo>();
+					let instances: Array<Record<string, unknown>>;
+					try {
+						const data = await moodleCall<{ instances?: Array<Record<string, unknown>> }>(env(), 'core_course_get_updates_since', { courseid: c.id, since }, y);
+						instances = (data.instances ?? []).filter((i) => i.contextlevel === 'module');
+					} catch (err) {
+						// Merlin's updates_since fails with a database error on some courses. Fall back to
+						// file times from the content tree: catches new and changed files, not other edits.
+						const idx = await getModuleIndex(env(), y, c.id).catch(emptyIdx);
+						const changes = [...idx.entries()]
+							.map(([cmid, m]) => ({ cmid, m, newFiles: m.files.filter((f) => f.timemodified >= since) }))
+							.filter((x) => x.newFiles.length)
+							.map(({ cmid, m, newFiles }) => ({
+								cmid,
+								name: m.name,
+								type: m.modname,
+								section: m.section,
+								what: ['contentfiles'],
+								files: newFiles.map((f) => f.filename),
+								latest_local: zagrebTime(Math.max(...newFiles.map((f) => f.timemodified))),
+							}));
+						return [
+							{
+								courseid: c.id,
+								course: c.fullname,
+								partial: `Merlin could not list this course's updates (${redactSecret(String(err instanceof Error ? err.message : err), allTokens(env()))}); only new or changed files are shown.`,
+								changes,
+							},
+						];
+					}
+					if (!instances.length) return [];
+					const idx = await getModuleIndex(env(), y, c.id).catch(emptyIdx);
+					return [
+						{
+							courseid: c.id,
+							course: c.fullname,
+							changes: instances.map((i) => {
+								const m = idx.get(Number(i.id));
+								const ups = (i.updates as Array<Record<string, unknown>> | undefined) ?? [];
+								return {
+									cmid: i.id,
+									name: m?.name,
+									type: m?.modname,
+									section: m?.section,
+									what: ups.map((u) => u.name),
+									latest_local: zagrebTime(Math.max(0, ...ups.map((u) => Number(u.timeupdated) || 0))),
+								};
+							}),
+						},
+					];
+				});
+				return perCourse.flat();
+			});
+			return toToolResult({ ...listResult(fan, fan.items), since, since_local: zagrebTime(since) });
+		}
+	);
+
 }
 
 export function createServer(env: Env, ctx?: RunCtx): McpServer {

@@ -81,13 +81,15 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 							name: 'Slides',
 							modname: 'resource',
 							visible: 1,
-							contents: [{ filename: 'slides.pdf', filesize: 10, mimetype: 'application/pdf', timemodified: 1, fileurl: 'https://moodle.srce.hr/pluginfile.php/1/slides.pdf' }],
+							contents: [{ type: 'file', filename: 'slides.pdf', filesize: 10, mimetype: 'application/pdf', timemodified: 1, fileurl: 'https://moodle.srce.hr/pluginfile.php/1/slides.pdf' }],
 						},
 					],
 				},
 			];
 		case 'mod_forum_get_forums_by_courses':
-			return is26 ? [{ id: 7 }] : [{ id: 9 }];
+			return is26
+				? [{ id: 7, course: 10, type: 'news', name: 'Obavijesti' }, { id: 70, course: 20, type: 'general', name: 'Q&A' }]
+				: [{ id: 9, course: 10, type: 'news', name: 'Obavijesti (old)' }];
 		case 'mod_forum_get_forum_discussions':
 			return { discussions: [{ id: 1, discussion: 55, name: 'Exam date', subject: 'Exam date', userfullname: 'Test Teacher', created: 1, timemodified: 2, pinned: false, numreplies: 0, message: '<p>Exam on <b>Friday</b></p>' }] };
 		case 'mod_forum_get_discussion_posts':
@@ -128,7 +130,29 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 				feedback: { gradefordisplay: '<b>8 / 10</b>', plugins: [{ type: 'comments', editorfields: [{ name: 'comments', text: '<p>Good <i>work</i></p>' }] }] },
 			};
 		case 'mod_quiz_get_quizzes_by_courses':
-			return { quizzes: is26 ? [{ id: 3 }] : [{ id: 99 }] };
+			return {
+				quizzes: is26
+					? [{ id: 3, course: 10, coursemodule: 300, name: 'Samoprovjera', timeopen: 8000, timeclose: 9500, timelimit: 900, attempts: 2, grademethod: 1, grade: 10, sumgrades: 20 }]
+					: [{ id: 99, course: 10, coursemodule: 990, name: 'Old quiz', timeopen: 0, timeclose: 0, timelimit: 0, attempts: 0, grademethod: 4, grade: 5 }],
+			};
+		case 'core_group_get_course_user_groups':
+			return { groups: is26 ? [{ id: 501, name: 'G2', courseid: 10, idnumber: '', description: '<p>Lab <b>2</b></p>' }] : [], warnings: [] };
+		case 'mod_choice_get_choices_by_courses':
+			return {
+				choices: is26
+					? [
+							{ id: 61, coursemodule: 600, course: 20, name: 'Prijava za vježbe', intro: '<p>Pick a slot</p>', timeopen: 0, timeclose: 4102444800, allowupdate: 1, allowmultiple: 0 },
+							{ id: 62, coursemodule: 601, course: 20, name: 'Closed poll', timeopen: 0, timeclose: 1000, allowupdate: 0, allowmultiple: 0 },
+						]
+					: [],
+			};
+		case 'mod_choice_get_choice_options':
+			return {
+				options: [
+					{ id: 1, text: 'Grupa 1 (10:15)', maxanswers: 20, countanswers: 20, checked: false, disabled: true },
+					{ id: 2, text: 'Grupa 2 (12:00)', maxanswers: 20, countanswers: 5, checked: true, disabled: false },
+				],
+			};
 		case 'mod_quiz_get_user_attempts':
 			return { attempts: [{ id: 31, attempt: 1, state: 'finished', timestart: 1, timefinish: 2, sumgrades: 7 }] };
 		case 'mod_quiz_get_attempt_review':
@@ -456,16 +480,21 @@ describe('moodle_send_message through tools/call', () => {
 
 describe('guard: the MCP surface stays read-only', () => {
 	const KNOWN_TOOLS = [
+		'moodle_get_all_updates_since',
 		'moodle_get_assignments',
 		'moodle_get_calendar_events',
+		'moodle_get_choices',
 		'moodle_get_course_contents',
 		'moodle_get_courses',
 		'moodle_get_forum_discussion',
 		'moodle_get_grades',
 		'moodle_get_messages',
+		'moodle_get_my_groups',
+		'moodle_get_new_forum_posts',
 		'moodle_get_notifications',
 		'moodle_get_quiz_attempt_review',
 		'moodle_get_quiz_attempts',
+		'moodle_get_quiz_details',
 		'moodle_get_recent_forum_posts',
 		'moodle_get_upcoming_deadlines',
 		'moodle_get_updates_since',
@@ -475,11 +504,11 @@ describe('guard: the MCP surface stays read-only', () => {
 		'moodle_whoami',
 	];
 
-	it('tools/list returns exactly the 17 known tools (adding one forces updating this list and its tests)', async () => {
+	it('tools/list returns exactly the 22 known tools (adding one forces updating this list and its tests)', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), ENV, ctx)).json()) as any;
 		const names: string[] = body.result.tools.map((t: { name: string }) => t.name).sort();
 		expect(names).toEqual([...KNOWN_TOOLS].sort());
-		expect(names).toHaveLength(17);
+		expect(names).toHaveLength(22);
 	});
 
 	it('every tool, called with realistic arguments, only sends read-only wsfunctions', async () => {
@@ -501,6 +530,11 @@ describe('guard: the MCP surface stays read-only', () => {
 			['moodle_list_files', { course_id: 20 }],
 			['moodle_send_message', { to_user_id: 777, text: 'Bok!' }],
 			['moodle_whoami', {}],
+			['moodle_get_quiz_details', {}],
+			['moodle_get_my_groups', {}],
+			['moodle_get_new_forum_posts', { forums: 'all', since: 1 }],
+			['moodle_get_choices', { include_closed: true }],
+			['moodle_get_all_updates_since', { since: 1 }],
 		];
 		const env = {
 			...ENV,
@@ -627,5 +661,114 @@ describe('moodle_read_file', () => {
 		const r = await callTool('moodle_read_file', { url: raw('one.pdf'), pages: '5' });
 		expect(r.isError).toBe(true);
 		expect(r.text).toMatch(/has 1 page/);
+	});
+});
+
+// ---------- Collage feature batch (15 Nov 2026) ----------
+
+describe('moodle_get_quiz_details', () => {
+	it('returns the rules and attempts left without touching an attempt', async () => {
+		overrides.mod_quiz_get_user_attempts = () => ({ attempts: [{ id: 31, attempt: 1, state: 'finished' }] });
+		const { data } = await callTool('moodle_get_quiz_details', { year: Y26 });
+		expect(data.items).toHaveLength(1);
+		expect(data.items[0]).toMatchObject({
+			quiz_id: 3,
+			course: 'Test Course 101',
+			time_limit_minutes: 15,
+			attempts_allowed: 2,
+			attempts_used: 1,
+			attempts_left: 1,
+			grading_method: 'highest',
+			max_grade: 10,
+		});
+		const fns = fnsCalled();
+		expect(fns).toContain('mod_quiz_get_user_attempts');
+		expect(calls.find((c) => c.fn === 'mod_quiz_get_user_attempts')!.params.get('status')).toBe('all');
+		expect(fns.filter((f) => /attempt_access|start_attempt|view_quiz|get_attempt_data|get_attempt_summary/.test(f))).toEqual([]);
+	});
+
+	it('reports unlimited attempts and no time limit', async () => {
+		overrides.mod_quiz_get_user_attempts = () => ({ attempts: [] });
+		const { data } = await callTool('moodle_get_quiz_details', { year: Y25 });
+		expect(data.items[0]).toMatchObject({ attempts_allowed: 'unlimited', attempts_left: 'unlimited', time_limit_minutes: null, grading_method: 'last' });
+	});
+});
+
+describe('moodle_get_my_groups', () => {
+	it('lists groups across courses with course names', async () => {
+		const { data } = await callTool('moodle_get_my_groups', { year: Y26 });
+		expect(data.items).toEqual([expect.objectContaining({ group_id: 501, name: 'G2', course: 'Test Course 101', description: 'Lab 2' })]);
+		const c = calls.find((x) => x.fn === 'core_group_get_course_user_groups')!;
+		expect(c.params.get('courseid')).toBe('0');
+		expect(c.params.get('userid')).toBe('42');
+	});
+});
+
+describe('moodle_get_new_forum_posts', () => {
+	it('defaults to announcement forums, filters by time, never reads posts', async () => {
+		overrides.mod_forum_get_forum_discussions = (_y, p) => ({
+			discussions: [
+				{ id: 1, discussion: 55, subject: 'New exam room', userfullname: 'Test Teacher', created: 5000, timemodified: 5000, numreplies: 0, message: '<p>Room <b>028</b></p>' },
+				{ id: 2, discussion: 56, subject: 'Old news', userfullname: 'Test Teacher', created: 10, timemodified: 10, numreplies: 0, message: 'x' },
+			].map((d) => ({ ...d, forumid: p.get('forumid') })),
+		});
+		const { data } = await callTool('moodle_get_new_forum_posts', { year: Y26, since: 1000 });
+		expect(data.items).toHaveLength(1);
+		expect(data.items[0]).toMatchObject({ forum: 'Obavijesti', course: 'Test Course 101', subject: 'New exam room', message: 'Room 028' });
+		const forumsRead = calls.filter((c) => c.fn === 'mod_forum_get_forum_discussions').map((c) => c.params.get('forumid'));
+		expect(forumsRead).toEqual(['7']);
+		expect(fnsCalled()).not.toContain('mod_forum_get_discussion_posts');
+	});
+
+	it('forums="all" reads every forum', async () => {
+		await callTool('moodle_get_new_forum_posts', { year: Y26, forums: 'all', since: 1 });
+		expect(calls.filter((c) => c.fn === 'mod_forum_get_forum_discussions').map((c) => c.params.get('forumid')).sort()).toEqual(['7', '70']);
+	});
+});
+
+describe('moodle_get_choices', () => {
+	it('lists open choices with options and my pick, without answering', async () => {
+		const { data } = await callTool('moodle_get_choices', { year: Y26 });
+		expect(data.items).toHaveLength(1);
+		expect(data.items[0]).toMatchObject({ name: 'Prijava za vježbe', course: 'Test Course 202', open_now: true, can_change_answer: true, my_pick: ['Grupa 2 (12:00)'] });
+		expect(data.items[0].options[0]).toMatchObject({ text: 'Grupa 1 (10:15)', taken: 20, max: 20, full: true });
+		expect(fnsCalled().filter((f) => /submit|delete|view/.test(f))).toEqual([]);
+	});
+
+	it('include_closed adds closed ones', async () => {
+		const { data } = await callTool('moodle_get_choices', { year: Y26, include_closed: true });
+		expect(data.items.map((c: any) => c.name)).toEqual(['Closed poll', 'Prijava za vježbe']);
+	});
+});
+
+describe('moodle_get_all_updates_since', () => {
+	it('names changed modules per course and falls back to file times when Merlin errors', async () => {
+		overrides.core_course_get_updates_since = (_y, p) =>
+			p.get('courseid') === '20'
+				? { exception: 'dml_read_exception', message: 'Pogreška pri čitanju iz baze podataka' }
+				: { instances: [{ contextlevel: 'module', id: 100, updates: [{ name: 'posts', timeupdated: 4000 }] }], warnings: [] };
+		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 1 });
+		const c10 = data.items.find((c: any) => c.courseid === 10);
+		expect(c10.changes[0]).toMatchObject({ cmid: 100, name: 'Announcements', type: 'forum', section: 'General', what: ['posts'] });
+		const c20 = data.items.find((c: any) => c.courseid === 20);
+		expect(c20.partial).toMatch(/only new or changed files/);
+		expect(c20.changes[0]).toMatchObject({ cmid: 101, name: 'Slides', files: ['slides.pdf'] });
+		expect(data.errors).toBeUndefined();
+	});
+});
+
+describe('moodle_get_upcoming_deadlines quiz context', () => {
+	it('adds time limit and attempts left to quiz items', async () => {
+		overrides.core_calendar_get_action_events_by_timesort = () => ({
+			events: [
+				{ id: 9, name: 'Samoprovjera closes', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'quiz', instance: 3, timesort: 9500, url: 'https://x' },
+				{ id: 8, name: 'Essay due', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'assign', instance: 5, timesort: 9000, url: 'https://x' },
+			],
+		});
+		overrides.mod_quiz_get_user_attempts = () => ({ attempts: [] });
+		const { data } = await callTool('moodle_get_upcoming_deadlines', { year: Y26 });
+		const quiz = data.items.find((e: any) => e.activity === 'quiz');
+		expect(quiz.quiz).toEqual({ quiz_id: 3, time_limit_minutes: 15, attempts_allowed: 2, attempts_used: 0, attempts_left: 2 });
+		expect(data.items.find((e: any) => e.activity === 'assign').quiz).toBeUndefined();
 	});
 });
