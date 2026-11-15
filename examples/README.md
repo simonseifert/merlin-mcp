@@ -17,7 +17,7 @@ Or with Docker: `docker compose -f examples/docker-compose.yml up --build`.
 
 ```bash
 curl -s localhost:8787/healthz
-# {"ok":true,"name":"merlin-mcp","version":"0.4.2"}
+# {"ok":true,"name":"merlin-mcp","version":"0.5.0"}
 
 curl -s localhost:8787/mcp \
   -H 'Authorization: Bearer demo-mcp-bearer' \
@@ -33,7 +33,7 @@ Point a real MCP client at `http://127.0.0.1:8787/mcp` with the header `Authoriz
 
 ## Files
 
-- `fake-moodle.mjs`: the fake Merlin. Serves `/<yyyy-yyyy>/webservice/rest/server.php` for the web-service functions the tools use, and `pluginfile.php` for one PDF. Dates are relative to now. `PORT`, `HOST` (default `127.0.0.1`) and `FAKE_MOODLE_QUIET=1` are the only knobs.
+- `fake-moodle.mjs`: the fake Merlin (`moodle_read_file` and `/api/file` refuse it on purpose: they only fetch from moodle.srce.hr). Serves `/<yyyy-yyyy>/webservice/rest/server.php` for the web-service functions the tools use, and `pluginfile.php` for one PDF. Dates are relative to now. `PORT`, `HOST` (default `127.0.0.1`) and `FAKE_MOODLE_QUIET=1` are the only knobs.
 - `ask.mjs`: a small MCP client over `/mcp` (`MERLIN_URL`, `MCP_BEARER` override the defaults).
 - `docker-compose.yml`: merlin-mcp plus the fake, bound to localhost.
 - `dev.vars.example`: for the Cloudflare Worker (`npm run dev`); copy to `.dev.vars`.

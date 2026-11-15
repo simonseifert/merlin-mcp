@@ -184,7 +184,21 @@ function call(fn, p, year, origin) {
 		case 'gradereport_user_get_grade_items':
 			return Number(p.courseid) === c.id ? { usergrades: [{ courseid: c.id, userid: ANA.userid, gradeitems: d.grades }] } : fail('invalidcourse', 'Course not found in this fake year');
 		case 'mod_quiz_get_quizzes_by_courses':
-			return { quizzes: d.quiz ? [{ id: d.quiz.id, course: c.id, name: d.quiz.name }] : [] };
+			return {
+				quizzes: d.quiz
+					? [{ id: d.quiz.id, course: c.id, coursemodule: 3000 + d.quiz.id, name: d.quiz.name, timeopen: at(-20), timeclose: at(10, 23), timelimit: 900, attempts: 2, grademethod: 1, grade: 10, sumgrades: 10 }]
+					: [],
+			};
+		case 'core_group_get_course_user_groups':
+			return { groups: [{ id: 900 + c.id, name: 'G2', courseid: c.id, idnumber: '', description: '' }], warnings: [] };
+		case 'mod_choice_get_choices_by_courses':
+			return {
+				choices: [{ id: 81, coursemodule: 4081, course: c.id, name: 'Prijava na vježbe (FAKE)', intro: '<p>Odaberite termin.</p>', timeopen: at(-2), timeclose: at(3, 23), allowupdate: 1, allowmultiple: 0 }],
+			};
+		case 'mod_choice_get_choice_options':
+			return Number(p.choiceid) === 81
+				? { options: [{ id: 1, text: 'Ponedjeljak 10:15', maxanswers: 20, countanswers: 20, checked: false, disabled: true }, { id: 2, text: 'Ponedjeljak 12:00', maxanswers: 20, countanswers: 7, checked: true, disabled: false }] }
+				: fail('invalidrecord', 'Choice not found in this fake year');
 		case 'mod_quiz_get_user_attempts':
 			return d.quiz && Number(p.quizid) === d.quiz.id ? { attempts: d.quiz.attempts } : fail('invalidrecord', 'Quiz not found in this fake year');
 		case 'mod_quiz_get_attempt_review':

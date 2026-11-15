@@ -166,7 +166,7 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 	}
 }
 
-let files: Record<string, { body: BodyInit; headers: Record<string, string> }> = {};
+let files: Record<string, { body: BodyInit | null; headers: Record<string, string>; status?: number }> = {};
 let fileFetches: URL[] = [];
 
 beforeEach(() => {
@@ -180,7 +180,7 @@ beforeEach(() => {
 		if (u.pathname.includes('/pluginfile.php/')) {
 			fileFetches.push(u);
 			const f = files[u.pathname];
-			return f ? new Response(f.body, { status: 200, headers: f.headers }) : new Response('<html>not found token=' + u.searchParams.get('token') + '</html>', { status: 404 });
+			return f ? new Response(f.body, { status: f.status ?? 200, headers: f.headers }) : new Response('<html>not found token=' + u.searchParams.get('token') + '</html>', { status: 404 });
 		}
 		const fn = u.searchParams.get('wsfunction') ?? '';
 		const year = u.pathname.split('/')[1];
@@ -190,7 +190,7 @@ beforeEach(() => {
 		calls.push({ year, fn, params });
 		seenFunctions.add(fn);
 		const data = (overrides[fn] ?? ((y, p) => fixture(y, fn, p)))(year, params);
-		return jsonResponse(data);
+		return data instanceof Response ? data : jsonResponse(data);
 	});
 	vi.stubGlobal('fetch', fetchMock);
 });
@@ -594,6 +594,17 @@ describe('moodle_read_file', () => {
 	const raw = (name: string) => `https://moodle.srce.hr${PATH}${encodeURIComponent(name)}`;
 	const api = (name: string) => `/api/file?url=${encodeURIComponent(raw(name))}`;
 
+	it('refuses a redirect and page 0', async () => {
+		files[PATH + 'r.pdf'] = { body: null, headers: { Location: 'https://evil.example/x' }, status: 302 };
+		const r = await callTool('moodle_read_file', { url: raw('r.pdf') });
+		expect(r.isError).toBe(true);
+		expect(r.text).toMatch(/redirect/);
+		files[PATH + 'p.pdf'] = { body: makePdf(['a', 'b']), headers: { 'Content-Type': 'application/pdf' } };
+		const z = await callTool('moodle_read_file', { url: raw('p.pdf'), pages: '0' });
+		expect(z.isError).toBe(true);
+		expect(z.text).toMatch(/start at 1/);
+	});
+
 	it('reads a PDF page range from the api_file_url form, adding the token server-side only', async () => {
 		files[PATH + '6.pdf'] = { body: makePdf(['Model procesa', 'Dijagram toka podataka', 'Balans']), headers: { 'Content-Type': 'application/pdf' } };
 		const { isError, text, data } = await callTool('moodle_read_file', { url: api('6.pdf'), pages: '2-3' });
@@ -638,7 +649,7 @@ describe('moodle_read_file', () => {
 		files[PATH + 'big.pdf'] = { body: 'x', headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(40 * 1024 * 1024) } };
 		const big = await callTool('moodle_read_file', { url: raw('big.pdf') });
 		expect(big.isError).toBe(true);
-		expect(big.text).toMatch(/over 30 MB/);
+		expect(big.text).toMatch(/over 20 MB/);
 
 		const missing = await callTool('moodle_read_file', { url: raw('nope.pdf') });
 		expect(missing.isError).toBe(true);
@@ -653,7 +664,13 @@ describe('moodle_read_file', () => {
 		expect(data.truncated).toBe(true);
 		const last = Number(String(data.pages).split('-')[1]);
 		expect(last).toBeLessThan(40);
-		expect(data.hint).toMatch(/next pages/);
+		expect(data.text.length).toBeLessThanOrEqual(1000);
+		// Resume from the page that was cut (or the next one), never past it.
+		expect(data.next_page).toBeGreaterThanOrEqual(last);
+		expect(data.next_page).toBeLessThanOrEqual(last + 1);
+		expect(data.hint).toContain(`pages="${data.next_page}-40"`);
+		const more = await callTool('moodle_read_file', { url: raw('many.pdf'), pages: `${data.next_page}-40`, max_chars: 1000 });
+		expect(more.data.text).toContain(`--- page ${data.next_page} ---`);
 	});
 
 	it('rejects a page outside the PDF', async () => {
@@ -777,5 +794,71 @@ describe('moodle_get_upcoming_deadlines quiz context', () => {
 		const quiz = data.items.find((e: any) => e.activity === 'quiz');
 		expect(quiz.quiz).toEqual({ quiz_id: 3, time_limit_minutes: 15, attempts_allowed: 2, attempts_used: 0, attempts_left: 2 });
 		expect(data.items.find((e: any) => e.activity === 'assign').quiz).toBeUndefined();
+	});
+});
+
+describe('review fixes (16 Nov 2026)', () => {
+	it('deadlines never attach a quiz whose cmid collides with another quiz id', async () => {
+		overrides.mod_quiz_get_quizzes_by_courses = () => ({
+			quizzes: [
+				{ id: 12, course: 10, coursemodule: 900, name: 'Quiz A', timelimit: 600, attempts: 1, grademethod: 1, grade: 5 },
+				{ id: 77, course: 10, coursemodule: 12, name: 'Quiz B', timelimit: 1800, attempts: 3, grademethod: 1, grade: 5 },
+			],
+		});
+		overrides.core_calendar_get_action_events_by_timesort = () => ({
+			events: [{ id: 1, name: 'Quiz A closes', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'quiz', instance: 12, timesort: 9000, url: 'https://moodle.srce.hr/2026-2027/mod/quiz/view.php?id=900' }],
+		});
+		overrides.mod_quiz_get_user_attempts = () => ({ attempts: [] });
+		const { data } = await callTool('moodle_get_upcoming_deadlines', { year: Y26 });
+		expect(data.items[0].quiz).toMatchObject({ quiz_id: 12, time_limit_minutes: 10, attempts_allowed: 1 });
+	});
+
+	it('one failing forum is reported, the others still answer', async () => {
+		overrides.mod_forum_get_forum_discussions = (_y, p) =>
+			p.get('forumid') === '70'
+				? { exception: 'dml_read_exception', message: 'Pogreška pri čitanju iz baze podataka' }
+				: { discussions: [{ id: 1, discussion: 55, subject: 'Still here', created: 5000, timemodified: 5000, message: 'x' }] };
+		const { data } = await callTool('moodle_get_new_forum_posts', { year: Y26, forums: 'all', since: 1 });
+		expect(data.errors).toBeUndefined();
+		expect(data.items.map((i: any) => i.subject)).toEqual(['Still here']);
+		expect(data.forum_errors).toEqual([expect.objectContaining({ forum_id: 70, forum: 'Q&A' })]);
+	});
+
+	it('all_updates_since surfaces the rate brake instead of calling courses partial', async () => {
+		overrides.core_course_get_updates_since = () => new Response('busy', { status: 429, headers: { 'Retry-After': '30' } });
+		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 1 });
+		expect(data.items).toEqual([]);
+		expect(data.not_fully_checked).toBeUndefined();
+		expect(JSON.stringify(data.errors)).toMatch(/slow down|429|Rate brake/);
+	});
+
+	it('choices: full comes from the counts, not the disabled flag', async () => {
+		overrides.mod_choice_get_choice_options = () => ({
+			options: [
+				{ id: 1, text: 'A', maxanswers: 20, countanswers: 3, checked: false, disabled: true },
+				{ id: 2, text: 'B', maxanswers: 2, countanswers: 2, checked: true, disabled: true },
+			],
+		});
+		const { data } = await callTool('moodle_get_choices', { year: Y26 });
+		expect(data.items[0].options[0].full).toBeUndefined();
+		expect(data.items[0].options[1].full).toBe(true);
+	});
+
+	it('quiz details filters: quiz_id, course_ids, only_open', async () => {
+		overrides.mod_quiz_get_quizzes_by_courses = () => ({
+			quizzes: [
+				{ id: 1, course: 10, name: 'Past', timeclose: 1000 },
+				{ id: 2, course: 20, name: 'Future', timeclose: 4102444800 },
+			],
+		});
+		overrides.mod_quiz_get_user_attempts = () => ({ attempts: [] });
+		expect((await callTool('moodle_get_quiz_details', { year: Y26, only_open: true })).data.items.map((q: any) => q.name)).toEqual(['Future']);
+		expect((await callTool('moodle_get_quiz_details', { year: Y26, quiz_id: 1 })).data.items.map((q: any) => q.name)).toEqual(['Past']);
+		expect((await callTool('moodle_get_quiz_details', { year: Y26, course_ids: [20] })).data.items.map((q: any) => q.name)).toEqual(['Future']);
+	});
+
+	it('since overrides hours_ago', async () => {
+		const { data } = await callTool('moodle_get_new_forum_posts', { year: Y26, since: 1234, hours_ago: 1 });
+		expect(data.since).toBe(1234);
 	});
 });

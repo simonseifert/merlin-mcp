@@ -255,12 +255,20 @@ function getCourses(env: Env, year: string): Promise<Course[]> {
 	});
 }
 
-function getForumIds(env: Env, year: string): Promise<Set<number>> {
-	return cached(`forums:${year}`, TEN_MIN, async () => {
-		const forums = await moodleCall<Array<{ id: number }>>(env, 'mod_forum_get_forums_by_courses', {}, year);
-		return new Set((forums ?? []).map((f) => f.id));
-	});
+function getForums(env: Env, year: string): Promise<Array<Record<string, unknown> & { id: number }>> {
+	return cached(`forumlist:${year}`, TEN_MIN, async () => (await moodleCall<Array<Record<string, unknown> & { id: number }>>(env, 'mod_forum_get_forums_by_courses', {}, year)) ?? []);
 }
+
+function getForumIds(env: Env, year: string): Promise<Set<number>> {
+	return getForums(env, year).then((fs) => new Set(fs.map((f) => f.id)));
+}
+
+/** Rate-brake errors must reach the caller (so it waits), never be folded into a per-item note. */
+function rethrowRateLimit(err: unknown): void {
+	if (err instanceof RateLimitError) throw err;
+}
+
+const MAX_FORUMS_PER_YEAR = 30;
 
 type Quiz = Record<string, unknown> & { id: number; course: number; coursemodule?: number; name?: string };
 
@@ -301,7 +309,9 @@ async function quizInfo(env: Env, year: string, q: Quiz, withAttempts: boolean):
 	};
 	if (withAttempts) {
 		try {
-			const data = await moodleCall<{ attempts?: Array<Record<string, unknown>> }>(env, 'mod_quiz_get_user_attempts', { quizid: q.id, status: 'all' }, year);
+			const data = await cached(`attempts:${year}:${q.id}`, 60_000, () =>
+				moodleCall<{ attempts?: Array<Record<string, unknown>> }>(env, 'mod_quiz_get_user_attempts', { quizid: q.id, status: 'all' }, year)
+			);
 			const attempts = data.attempts ?? [];
 			out.attempts_used = attempts.length;
 			out.attempt_in_progress = attempts.some((a) => a.state === 'inprogress' || a.state === 'overdue') || undefined;
@@ -1101,17 +1111,22 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				const events = data.events ?? [];
 				// Quiz items get the quiz's time limit and attempts left (settings + attempt list only).
 				const quizzes = events.some((e) => e.modulename === 'quiz') ? await getQuizzes(env(), y).catch(() => [] as Quiz[]) : [];
-				// The event's `instance` is the quiz id on some sites and the cmid on Merlin: match either.
-				const quizById = new Map<number, Quiz>();
-				for (const q of quizzes) {
-					quizById.set(q.id, q);
-					if (q.coursemodule) quizById.set(Number(q.coursemodule), q);
-				}
+				// Quiz ids and cmids are separate id spaces, so never mix them in one key. Prefer the cmid
+				// from the event link (mod/quiz/view.php?id=<cmid>); Merlin's `instance` is the cmid too.
+				const byCmid = new Map(quizzes.filter((q) => q.coursemodule).map((q) => [Number(q.coursemodule), q]));
+				const byId = new Map(quizzes.map((q) => [q.id, q]));
+				const findQuiz = (e: Record<string, unknown>): Quiz | undefined => {
+					const courseId = Number((e.course as Record<string, unknown> | undefined)?.id);
+					const sameCourse = (q?: Quiz) => (q && (!courseId || Number(q.course) === courseId) ? q : undefined);
+					const cmid = Number(/[?&]id=(\d+)/.exec(String(e.url ?? ''))?.[1]);
+					return sameCourse(byCmid.get(cmid)) ?? sameCourse(byCmid.get(Number(e.instance))) ?? sameCourse(byId.get(Number(e.instance)));
+				};
+				let quizLookups = 0;
 				return mapLimit(events, 4, async (e) => {
 					const course = e.course as Record<string, unknown> | undefined;
-					const q = e.modulename === 'quiz' ? quizById.get(Number(e.instance)) : undefined;
+					const q = e.modulename === 'quiz' ? findQuiz(e) : undefined;
 					let quiz: Record<string, unknown> | undefined;
-					if (q) {
+					if (q && quizLookups++ < 15) {
 						const info = await quizInfo(env(), y, q, true);
 						quiz = {
 							quiz_id: q.id,
@@ -1347,7 +1362,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		{
 			url: z.string().min(1).max(4000).describe('api_file_url from moodle_list_files, or the pluginfile URL'),
 			pages: z.string().regex(/^\d+(-\d+)?$/).optional().describe('PDF pages, e.g. "3" or "1-12" (default: all)'),
-			max_chars: z.number().int().min(1000).max(150000).default(60000).describe('Cut the text after this many characters'),
+			max_chars: z.number().int().min(1000).max(150000).default(60000).describe('Stop after this many characters (PDFs stop at a page and say where to continue)'),
 		},
 		async ({ url, pages, max_chars }) => {
 			const target = fileTargetFromArg(url);
@@ -1366,15 +1381,14 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				// keep the empty name; the content type still decides
 			}
 			const out = await extractFileText(buf, res.headers.get('Content-Type') ?? '', filename, pages, max_chars);
-			const truncated = out.text.length > max_chars;
-			return toToolResult({
-				filename,
-				bytes,
-				...out,
-				text: truncated ? out.text.slice(0, max_chars) : out.text,
-				truncated: truncated || undefined,
-				hint: truncated ? (out.kind === 'pdf' ? `Cut at max_chars after page ${out.pages}: ask for the next pages.` : 'Cut at max_chars.') : undefined,
-			});
+			let hint: string | undefined;
+			if (out.truncated) {
+				hint =
+					out.kind === 'pdf' && out.next_page
+						? `Stopped before the end: continue with pages="${out.next_page}-${out.total_pages}".`
+						: 'Cut at max_chars; raise max_chars (up to 150000) for more.';
+			}
+			return toToolResult({ filename, bytes, ...out, hint });
 		}
 	);
 	// 16. Quiz rules without starting an attempt
@@ -1436,20 +1450,23 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		},
 		async (args) => {
 			const since = sinceFrom(args);
+			const forumErrors: Array<Record<string, unknown>> = [];
+			const skipped: string[] = [];
 			const fan = await fanOut(await yearsFor(env(), args.year), async (y) => {
-				const [forums, courses] = await Promise.all([
-					moodleCall<Array<Record<string, unknown>>>(env(), 'mod_forum_get_forums_by_courses', {}, y),
-					getCourses(env(), y),
-				]);
+				const [forums, courses] = await Promise.all([getForums(env(), y), getCourses(env(), y)]);
 				const names = new Map(courses.map((c) => [c.id, c.fullname]));
-				const wanted = (forums ?? []).filter((f) => args.forums === 'all' || f.type === 'news');
+				const all = forums.filter((f) => args.forums === 'all' || f.type === 'news');
+				const wanted = all.slice(0, MAX_FORUMS_PER_YEAR);
+				if (all.length > wanted.length) skipped.push(`${y}: ${all.length - wanted.length} forums not read (limit ${MAX_FORUMS_PER_YEAR} per year)`);
 				const perForum = await mapLimit(wanted, 6, async (f) => {
-					const data = await moodleCall<{ discussions?: Array<Record<string, unknown>> }>(
-						env(),
-						'mod_forum_get_forum_discussions',
-						{ forumid: Number(f.id), sortorder: -1, page: 0, perpage: 15 },
-						y
-					);
+					let data: { discussions?: Array<Record<string, unknown>> };
+					try {
+						data = await moodleCall(env(), 'mod_forum_get_forum_discussions', { forumid: Number(f.id), sortorder: -1, page: 0, perpage: 15 }, y);
+					} catch (err) {
+						rethrowRateLimit(err);
+						forumErrors.push({ year: y, forum_id: f.id, forum: f.name, course: names.get(Number(f.course)), error: String(err instanceof Error ? err.message : err) });
+						return [];
+					}
 					return (data.discussions ?? [])
 						.filter((d) => Number(d.timemodified) >= since || Number(d.created) >= since)
 						.map((d) => ({
@@ -1471,7 +1488,13 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				return perForum.flat();
 			});
 			const items = sortByNumber(fan.items, (d) => d.timemodified, 'desc').slice(0, args.limit);
-			return toToolResult({ ...listResult(fan, items), since, since_local: zagrebTime(since) });
+			return toToolResult({
+				...listResult(fan, items),
+				since,
+				since_local: zagrebTime(since),
+				forum_errors: forumErrors.length ? forumErrors : undefined,
+				skipped: skipped.length ? skipped : undefined,
+			});
 		}
 	);
 
@@ -1514,7 +1537,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 							text: typeof o.text === 'string' ? stripHtml(o.text) : o.text,
 							taken: o.countanswers,
 							max: Number(o.maxanswers) > 0 ? o.maxanswers : undefined,
-							full: Boolean(o.disabled) && !o.checked ? true : undefined,
+							full: Number(o.maxanswers) > 0 && Number(o.countanswers) >= Number(o.maxanswers) ? true : undefined,
 						}));
 						entry.my_pick = (opts.options ?? []).filter((o) => o.checked).map((o) => (typeof o.text === 'string' ? stripHtml(o.text) : o.text));
 						if (!(opts.options ?? []).length && !open) {
@@ -1552,9 +1575,13 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 						const data = await moodleCall<{ instances?: Array<Record<string, unknown>> }>(env(), 'core_course_get_updates_since', { courseid: c.id, since }, y);
 						instances = (data.instances ?? []).filter((i) => i.contextlevel === 'module');
 					} catch (err) {
+						rethrowRateLimit(err);
 						// Merlin's updates_since fails with a database error on some courses. Fall back to
 						// file times from the content tree: catches new and changed files, not other edits.
-						const idx = await getModuleIndex(env(), y, c.id).catch(emptyIdx);
+						const idx = await getModuleIndex(env(), y, c.id).catch((err) => {
+							rethrowRateLimit(err);
+							return emptyIdx();
+						});
 						const changes = [...idx.entries()]
 							.map(([cmid, m]) => ({ cmid, m, newFiles: m.files.filter((f) => f.timemodified >= since) }))
 							.filter((x) => x.newFiles.length)
@@ -1577,7 +1604,10 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 						];
 					}
 					if (!instances.length) return [];
-					const idx = await getModuleIndex(env(), y, c.id).catch(emptyIdx);
+					const idx = await getModuleIndex(env(), y, c.id).catch((err) => {
+							rethrowRateLimit(err);
+							return emptyIdx();
+						});
 					return [
 						{
 							courseid: c.id,

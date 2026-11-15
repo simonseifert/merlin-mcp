@@ -37,7 +37,7 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_get_upcoming_deadlines` | core_calendar_get_action_events_by_timesort | action-required items, sorted by due time |
 | `moodle_get_course_contents` | core_course_get_contents | sections and modules of one course |
 | `moodle_list_files` | core_course_get_contents | every file with size, modified time and a ready `/api/file?url=…` path |
-| `moodle_read_file` | (file download, no wsfunction) | the text of one course file: PDF page by page, plain text, Markdown, CSV, JSON or HTML (30 MB cap, `pages` and `max_chars` to keep it small) |
+| `moodle_read_file` | (file download, no wsfunction) | the text of one course file: PDF page by page, plain text, Markdown, CSV, JSON or HTML (20 MB cap, at most 200 PDF pages per call, `pages` and `max_chars` to keep it small) |
 | `moodle_get_quiz_details` | mod_quiz_get_quizzes_by_courses, mod_quiz_get_user_attempts | quiz rules without an attempt: open/close, time limit, attempts allowed/used/left, grading method, max grade |
 | `moodle_get_my_groups` | core_group_get_course_user_groups | your groups per course (groupings are teacher-only in Moodle) |
 | `moodle_get_new_forum_posts` | mod_forum_get_forums_by_courses, mod_forum_get_forum_discussions | new discussions since a time across every course, announcement forums by default; marks nothing read |

@@ -376,7 +376,7 @@ export const RESERVED_MOODLE_PARAMS = new Set(['wstoken', 'wsfunction', 'moodlew
  * and it is never browser-like.
  */
 /** Released version (keep in sync with package.json). Sent in the User-Agent and /healthz. */
-export const VERSION = '0.4.2';
+export const VERSION = '0.5.0';
 
 export function moodleUserAgent(contact?: string): string {
 	const c = (contact ?? '').trim();

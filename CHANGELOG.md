@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-11-16)
 
 - `moodle_get_quiz_details`: quiz rules without starting an attempt (open/close, time limit, attempts allowed, used and left, grading method, max grade).
 - `moodle_get_my_groups`: your groups per course. Groupings are left out: Moodle only shows them to teachers.
@@ -9,7 +9,9 @@
 - `moodle_get_all_updates_since`: changes in every course in one call, with activity names. Merlin's `core_course_get_updates_since` fails with a database error on about half the courses (both years, 16 Nov 2026); those are marked `partial` and show new or changed files from the content tree instead.
 - `moodle_get_upcoming_deadlines`: quiz items carry the time limit and attempts left.
 - Not built: attendance (`mod_attendance` is not in Merlin's mobile service).
-- `moodle_read_file`: the text of one course file (PDF page by page via unpdf, plain text, Markdown, CSV, JSON, HTML), with a page range, a character cap and a 30 MB limit. It shares `/api/file`'s checks (Moodle file URLs only, server-side token, no redirects, no error pages).
+- The fake Merlin in `examples/` covers groups, choices and quiz settings.
+- Pre-release review fixes: deadline quiz context matches by cmid and course (quiz ids and cmids never share a key); one failing forum no longer blanks a year in `moodle_get_new_forum_posts` (reported in `forum_errors`, at most 30 forums per year); the rate brake surfaces as an error instead of "partial" courses; choice `full` comes from the answer counts; attempt lists are cached for a minute and deadlines look up at most 15 quizzes; PDFs stop cleanly at `max_chars` with a `next_page` to continue from.
+- `moodle_read_file`: the text of one course file (PDF page by page via unpdf, plain text, Markdown, CSV, JSON, HTML), with a page range, a character cap, a 20 MB limit and at most 200 PDF pages per call. It shares `/api/file`'s checks (Moodle file URLs only, server-side token, no redirects, no error pages).
 
 ## 0.4.2 (2026-11-15)
 

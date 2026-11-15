@@ -13,3 +13,4 @@ dist/
 *.sqlite
 *.env
 .claude/
+skills/merlin/LOCAL.md
