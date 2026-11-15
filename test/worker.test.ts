@@ -471,17 +471,17 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 		expect(body.result.serverInfo.name).toBe('merlin-mcp');
 	});
 
-	it('tools/list has the 16 tools, including the approval-gated send, when a relay is configured', async () => {
+	it('tools/list has the 17 tools, including the approval-gated send, when a relay is configured', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay' }, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(16);
+		expect(names).toHaveLength(17);
 		expect(names).toContain('moodle_send_message');
 	});
 
 	it('without RELAY_BEARER the send tool is left out (nobody could approve it)', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), SPLIT, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(15);
+		expect(names).toHaveLength(16);
 		expect(names).not.toContain('moodle_send_message');
 	});
 
@@ -496,7 +496,7 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 	it('MERLIN_ENABLE_SEND="0" leaves the send tool out', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay', MERLIN_ENABLE_SEND: '0' }, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(15);
+		expect(names).toHaveLength(16);
 		expect(names).not.toContain('moodle_send_message');
 	});
 

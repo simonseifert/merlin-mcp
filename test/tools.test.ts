@@ -142,12 +142,22 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 	}
 }
 
+let files: Record<string, { body: BodyInit; headers: Record<string, string> }> = {};
+let fileFetches: URL[] = [];
+
 beforeEach(() => {
 	__resetCaches();
 	calls = [];
 	overrides = {};
+	files = {};
+	fileFetches = [];
 	fetchMock = vi.fn(async (input: string, init?: RequestInit) => {
 		const u = new URL(input);
+		if (u.pathname.includes('/pluginfile.php/')) {
+			fileFetches.push(u);
+			const f = files[u.pathname];
+			return f ? new Response(f.body, { status: 200, headers: f.headers }) : new Response('<html>not found token=' + u.searchParams.get('token') + '</html>', { status: 404 });
+		}
 		const fn = u.searchParams.get('wsfunction') ?? '';
 		const year = u.pathname.split('/')[1];
 		const params = new URLSearchParams(u.searchParams);
@@ -460,15 +470,16 @@ describe('guard: the MCP surface stays read-only', () => {
 		'moodle_get_upcoming_deadlines',
 		'moodle_get_updates_since',
 		'moodle_list_files',
+		'moodle_read_file',
 		'moodle_send_message',
 		'moodle_whoami',
 	];
 
-	it('tools/list returns exactly the 16 known tools (adding one forces updating this list and its tests)', async () => {
+	it('tools/list returns exactly the 17 known tools (adding one forces updating this list and its tests)', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), ENV, ctx)).json()) as any;
 		const names: string[] = body.result.tools.map((t: { name: string }) => t.name).sort();
 		expect(names).toEqual([...KNOWN_TOOLS].sort());
-		expect(names).toHaveLength(16);
+		expect(names).toHaveLength(17);
 	});
 
 	it('every tool, called with realistic arguments, only sends read-only wsfunctions', async () => {
@@ -513,5 +524,97 @@ describe('guard: the MCP surface stays read-only', () => {
 		expect(sent.has('core_message_send_instant_messages')).toBe(false);
 		// Every function a tool calls is a getter.
 		expect([...sent].filter((f) => !/_get_/.test(f))).toEqual([]);
+	});
+});
+
+// ---------- moodle_read_file ----------
+
+/** Smallest valid PDF with one text line per page (xref offsets computed). */
+function makePdf(pages: string[]): Uint8Array {
+	const objs: string[] = [];
+	const kids = pages.map((_, i) => `${3 + i * 2} 0 R`).join(' ');
+	objs.push('<< /Type /Catalog /Pages 2 0 R >>');
+	objs.push(`<< /Type /Pages /Kids [${kids}] /Count ${pages.length} >>`);
+	const fontId = 3 + pages.length * 2;
+	pages.forEach((t, i) => {
+		const stream = `BT /F1 12 Tf 72 720 Td (${t}) Tj ET`;
+		objs.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${fontId} 0 R >> >> /Contents ${4 + i * 2} 0 R >>`);
+		objs.push(`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`);
+	});
+	objs.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+	let out = '%PDF-1.4\n';
+	const offsets: number[] = [];
+	objs.forEach((o, i) => {
+		offsets.push(out.length);
+		out += `${i + 1} 0 obj\n${o}\nendobj\n`;
+	});
+	const xref = out.length;
+	out += `xref\n0 ${objs.length + 1}\n0000000000 65535 f \n`;
+	for (const off of offsets) out += `${String(off).padStart(10, '0')} 00000 n \n`;
+	out += `trailer\n<< /Size ${objs.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`;
+	return new TextEncoder().encode(out);
+}
+
+describe('moodle_read_file', () => {
+	const PATH = '/2026-2027/webservice/pluginfile.php/1/mod_resource/content/0/';
+	const raw = (name: string) => `https://moodle.srce.hr${PATH}${encodeURIComponent(name)}`;
+	const api = (name: string) => `/api/file?url=${encodeURIComponent(raw(name))}`;
+
+	it('reads a PDF page range from the api_file_url form, adding the token server-side only', async () => {
+		files[PATH + '6.pdf'] = { body: makePdf(['Model procesa', 'Dijagram toka podataka', 'Balans']), headers: { 'Content-Type': 'application/pdf' } };
+		const { isError, text, data } = await callTool('moodle_read_file', { url: api('6.pdf'), pages: '2-3' });
+		expect(isError, text).toBe(false);
+		expect(data).toMatchObject({ filename: '6.pdf', kind: 'pdf', total_pages: 3, pages: '2-3' });
+		expect(data.text).toContain('--- page 2 ---');
+		expect(data.text).toContain('Dijagram toka podataka');
+		expect(data.text).toContain('Balans');
+		expect(data.text).not.toContain('Model procesa');
+		expect(fileFetches[0].searchParams.get('token')).toBeTruthy();
+		expect(text).not.toContain(fileFetches[0].searchParams.get('token')!);
+	});
+
+	it('reads plain text and strips HTML', async () => {
+		files[PATH + 'notes.md'] = { body: '# DTP\nproces = glagol', headers: { 'Content-Type': 'application/octet-stream' } };
+		files[PATH + 'page.html'] = { body: '<p>Tok <b>podataka</b></p><script>x()</script>', headers: { 'Content-Type': 'text/html' } };
+		expect((await callTool('moodle_read_file', { url: raw('notes.md') })).data).toMatchObject({ kind: 'text', text: '# DTP\nproces = glagol' });
+		const html = (await callTool('moodle_read_file', { url: raw('page.html') })).data;
+		expect(html.kind).toBe('html');
+		expect(html.text).toContain('Tok podataka');
+		expect(html.text).not.toContain('<b>');
+	});
+
+	it('cuts long text at max_chars and says so', async () => {
+		files[PATH + 'long.txt'] = { body: 'a'.repeat(5000), headers: { 'Content-Type': 'text/plain' } };
+		const { data } = await callTool('moodle_read_file', { url: raw('long.txt'), max_chars: 1000 });
+		expect(data.text).toHaveLength(1000);
+		expect(data.truncated).toBe(true);
+	});
+
+	it('refuses other hosts, unsupported types, oversized files and Moodle error pages', async () => {
+		const evil = await callTool('moodle_read_file', { url: 'https://evil.example/2026-2027/pluginfile.php/1/x.pdf' });
+		expect(evil.isError).toBe(true);
+		expect(fileFetches).toHaveLength(0);
+
+		files[PATH + 'a.docx'] = { body: 'PK..', headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' } };
+		const docx = await callTool('moodle_read_file', { url: raw('a.docx') });
+		expect(docx.isError).toBe(true);
+		expect(docx.text).toMatch(/Can't read text/);
+
+		files[PATH + 'big.pdf'] = { body: 'x', headers: { 'Content-Type': 'application/pdf', 'Content-Length': String(40 * 1024 * 1024) } };
+		const big = await callTool('moodle_read_file', { url: raw('big.pdf') });
+		expect(big.isError).toBe(true);
+		expect(big.text).toMatch(/over 30 MB/);
+
+		const missing = await callTool('moodle_read_file', { url: raw('nope.pdf') });
+		expect(missing.isError).toBe(true);
+		expect(missing.text).toMatch(/Moodle answered 404/);
+		expect(missing.text).not.toMatch(/token=/);
+	});
+
+	it('rejects a page outside the PDF', async () => {
+		files[PATH + 'one.pdf'] = { body: makePdf(['only']), headers: { 'Content-Type': 'application/pdf' } };
+		const r = await callTool('moodle_read_file', { url: raw('one.pdf'), pages: '5' });
+		expect(r.isError).toBe(true);
+		expect(r.text).toMatch(/has 1 page/);
 	});
 });

@@ -37,6 +37,7 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_get_upcoming_deadlines` | core_calendar_get_action_events_by_timesort | action-required items, sorted by due time |
 | `moodle_get_course_contents` | core_course_get_contents | sections and modules of one course |
 | `moodle_list_files` | core_course_get_contents | every file with size, modified time and a ready `/api/file?url=…` path |
+| `moodle_read_file` | (file download, no wsfunction) | the text of one course file: PDF page by page, plain text, Markdown, CSV, JSON or HTML (30 MB cap, `pages` and `max_chars` to keep it small) |
 | `moodle_get_updates_since` | core_course_get_updates_since | cheap "what changed in the last N hours" |
 | `moodle_get_recent_forum_posts` | mod_forum_get_forum_discussions | latest discussions in a forum |
 | `moodle_get_forum_discussion` | mod_forum_get_discussion_posts | full text of one thread (marks it read, like a browser) |

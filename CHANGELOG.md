@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `moodle_read_file`: the text of one course file (PDF page by page via unpdf, plain text, Markdown, CSV, JSON, HTML), with a page range, a character cap and a 30 MB limit. It shares `/api/file`'s checks (Moodle file URLs only, server-side token, no redirects, no error pages).
+
 ## 0.4.2 (2026-11-15)
 
 - Built-in notifier: set `NOTIFY_NTFY_URL` (+ `NOTIFY_NTFY_TOKEN`) or `NOTIFY_WEBHOOK_URL` (+ `NOTIFY_WEBHOOK_FORMAT=json|discord`) and a new send request pushes the recipient, full text and Send / Reject links to your phone, with a short outcome message after. No relay script needed; `RELAY_BEARER` and `/api/pending` still work.
