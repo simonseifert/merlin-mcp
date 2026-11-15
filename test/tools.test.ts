@@ -612,6 +612,16 @@ describe('moodle_read_file', () => {
 		expect(missing.text).not.toMatch(/token=/);
 	});
 
+	it('stops reading PDF pages once max_chars is reached', async () => {
+		files[PATH + 'many.pdf'] = { body: makePdf(Array.from({ length: 40 }, (_, i) => `Page ${i + 1} ` + 'x'.repeat(60))), headers: { 'Content-Type': 'application/pdf' } };
+		const { data } = await callTool('moodle_read_file', { url: raw('many.pdf'), max_chars: 1000 });
+		expect(data.total_pages).toBe(40);
+		expect(data.truncated).toBe(true);
+		const last = Number(String(data.pages).split('-')[1]);
+		expect(last).toBeLessThan(40);
+		expect(data.hint).toMatch(/next pages/);
+	});
+
 	it('rejects a page outside the PDF', async () => {
 		files[PATH + 'one.pdf'] = { body: makePdf(['only']), headers: { 'Content-Type': 'application/pdf' } };
 		const r = await callTool('moodle_read_file', { url: raw('one.pdf'), pages: '5' });

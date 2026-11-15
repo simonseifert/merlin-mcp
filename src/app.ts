@@ -1274,7 +1274,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 			} catch {
 				// keep the empty name; the content type still decides
 			}
-			const out = await extractFileText(buf, res.headers.get('Content-Type') ?? '', filename, pages);
+			const out = await extractFileText(buf, res.headers.get('Content-Type') ?? '', filename, pages, max_chars);
 			const truncated = out.text.length > max_chars;
 			return toToolResult({
 				filename,
@@ -1282,7 +1282,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				...out,
 				text: truncated ? out.text.slice(0, max_chars) : out.text,
 				truncated: truncated || undefined,
-				hint: truncated ? (out.kind === 'pdf' ? 'Cut at max_chars: ask for a smaller page range.' : 'Cut at max_chars.') : undefined,
+				hint: truncated ? (out.kind === 'pdf' ? `Cut at max_chars after page ${out.pages}: ask for the next pages.` : 'Cut at max_chars.') : undefined,
 			});
 		}
 	);

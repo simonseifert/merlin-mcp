@@ -36,24 +36,40 @@ function isPdf(buf: Uint8Array, type: string, name: string): boolean {
 	return buf.length >= 4 && buf[0] === 0x25 && buf[1] === 0x50 && buf[2] === 0x44 && buf[3] === 0x46; // %PDF
 }
 
-export async function extractFileText(buf: Uint8Array, contentType: string, filename: string, pages?: string): Promise<FileText> {
+export async function extractFileText(buf: Uint8Array, contentType: string, filename: string, pages?: string, maxChars = Infinity): Promise<FileText> {
 	const type = contentType.split(';')[0].trim().toLowerCase();
 	if (isPdf(buf, type, filename)) {
-		const { getDocumentProxy, extractText } = await import('unpdf');
+		const { getDocumentProxy } = await import('unpdf');
 		const pdf = await getDocumentProxy(buf);
-		const { totalPages, text } = await extractText(pdf, { mergePages: false });
-		const [from, to] = parsePageRange(pages, totalPages);
-		const parts: string[] = [];
-		for (let p = from; p <= to; p++) parts.push(`--- page ${p} ---\n${(text[p - 1] ?? '').trim()}`);
-		const body = parts.join('\n\n');
-		const empty = text.slice(from - 1, to).every((t) => !t.trim());
-		return {
-			kind: 'pdf',
-			total_pages: totalPages,
-			pages: `${from}-${to}`,
-			text: body,
-			note: empty ? 'No text layer on these pages (a scanned or image-only PDF). Download it with /api/file and use OCR instead.' : undefined,
-		};
+		try {
+			const totalPages = pdf.numPages;
+			const [from, to] = parsePageRange(pages, totalPages);
+			// Only the requested pages, one at a time, stopping once the text passes maxChars.
+			const parts: string[] = [];
+			let chars = 0;
+			let last = from - 1;
+			let empty = true;
+			for (let p = from; p <= to && chars <= maxChars; p++) {
+				const page = await pdf.getPage(p);
+				const content = await page.getTextContent();
+				const text = content.items.map((it) => ('str' in it ? it.str + (it.hasEOL ? '\n' : '') : '')).join('').trim();
+				page.cleanup();
+				if (text) empty = false;
+				const part = `--- page ${p} ---\n${text}`;
+				parts.push(part);
+				chars += part.length + 2;
+				last = p;
+			}
+			return {
+				kind: 'pdf',
+				total_pages: totalPages,
+				pages: `${from}-${last}`,
+				text: parts.join('\n\n'),
+				note: empty ? 'No text layer on these pages (a scanned or image-only PDF). Download it with /api/file and use OCR instead.' : undefined,
+			};
+		} finally {
+			await pdf.cleanup();
+		}
 	}
 	const decoded = () => new TextDecoder('utf-8').decode(buf);
 	if (type === 'text/html' || /\.html?$/i.test(filename)) return { kind: 'html', text: stripHtml(decoded()) };
