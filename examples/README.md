@@ -17,7 +17,7 @@ Or with Docker: `docker compose -f examples/docker-compose.yml up --build`.
 
 ```bash
 curl -s localhost:8787/healthz
-# {"ok":true,"name":"merlin-mcp","version":"0.4.1"}
+# {"ok":true,"name":"merlin-mcp","version":"0.4.2"}
 
 curl -s localhost:8787/mcp \
   -H 'Authorization: Bearer demo-mcp-bearer' \
