@@ -3,10 +3,9 @@ import worker from '../src/index.js';
 import { __resetCaches, MAX_CALLS_PER_MIN } from '../src/app.js';
 
 // The worker's default fetch handler is exercised directly here (no workerd
-// sandbox) for every route except /mcp and /sse, which delegate to the
-// MerlinMCP Durable Object via `env.MCP_OBJECT`: that binding only exists in
-// a real Workers runtime, so DO-backed routing is verified live in
-// production instead (see the deploy check in README.md).
+// sandbox). The approval store Durable Object only exists in a real Workers
+// runtime, so that part is verified live in production instead (see the
+// deploy check in README.md).
 //
 // Outbound calls to Moodle go through the global `fetch`, which is stubbed
 // per test below.

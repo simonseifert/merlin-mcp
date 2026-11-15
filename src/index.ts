@@ -4,9 +4,8 @@
  * one approval store.
  *
  * /mcp is stateless (one MCP server per request, src/app.ts handleMcp), so the
- * old per-session MerlinMCP Durable Object is no longer used. Its class stays
- * as an empty stub so a rollback to a pre-0.4 version still finds it; delete it
- * with a `deleted_classes` migration once 0.4 has run for a while.
+ * old per-session MerlinMCP Durable Object was removed (migration v3 in
+ * wrangler.toml).
  */
 
 import { DurableObject } from 'cloudflare:workers';
@@ -30,8 +29,6 @@ export class ApprovalStore extends DurableObject implements ApprovalsApi {
 	}
 }
 
-/** Unused since 0.4 (stateless /mcp). Kept only so rollbacks keep working. */
-export class MerlinMCP extends DurableObject {}
 
 export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {

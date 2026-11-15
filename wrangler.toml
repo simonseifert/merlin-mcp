@@ -27,12 +27,7 @@ LEGACY_API_BEARER = "0"
 #   MOODLE_CONTACT (optional): email for the User-Agent so SRCE can reach you
 #   MOODLE_TOKENS (optional): JSON map {"2025-2026": "...", ...}; falls back to MOODLE_TOKEN
 
-# Unused since 0.4 (stateless /mcp). Empty stub kept so rollbacks to <0.4 still work;
-# remove later with a [[migrations]] deleted_classes = ["MerlinMCP"] entry.
-[[durable_objects.bindings]]
-name = "MCP_OBJECT"
-class_name = "MerlinMCP"
-
+# Migration history (v1 created the per-session MerlinMCP object used before 0.4).
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["MerlinMCP"]
@@ -45,3 +40,8 @@ class_name = "ApprovalStore"
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["ApprovalStore"]
+
+# 15 Nov 2026: removed the empty MerlinMCP stub (unused since 0.4, stateless /mcp).
+[[migrations]]
+tag = "v3"
+deleted_classes = ["MerlinMCP"]
