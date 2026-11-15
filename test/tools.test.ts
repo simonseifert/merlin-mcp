@@ -565,6 +565,7 @@ describe('moodle_read_file', () => {
 		const { isError, text, data } = await callTool('moodle_read_file', { url: api('6.pdf'), pages: '2-3' });
 		expect(isError, text).toBe(false);
 		expect(data).toMatchObject({ filename: '6.pdf', kind: 'pdf', total_pages: 3, pages: '2-3' });
+		expect(data.bytes).toBeGreaterThan(100);
 		expect(data.text).toContain('--- page 2 ---');
 		expect(data.text).toContain('Dijagram toka podataka');
 		expect(data.text).toContain('Balans');

@@ -1267,6 +1267,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				throw new Error(err instanceof Error ? err.message : String(err));
 			}
 			const buf = await readCapped(res, READ_FILE_MAX_BYTES);
+			const bytes = buf.byteLength; // read before extraction: the PDF parser takes over (detaches) the buffer
 			let filename = '';
 			try {
 				filename = decodeURIComponent(new URL(target).pathname.split('/').pop() ?? '');
@@ -1277,7 +1278,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 			const truncated = out.text.length > max_chars;
 			return toToolResult({
 				filename,
-				bytes: buf.byteLength,
+				bytes,
 				...out,
 				text: truncated ? out.text.slice(0, max_chars) : out.text,
 				truncated: truncated || undefined,
