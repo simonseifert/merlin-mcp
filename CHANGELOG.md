@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.1 (2026-11-16)
+
+- Updates no longer fail a whole course because of one broken activity. Merlin's `core_course_get_updates_since` answered "Error reading from database" on 8 of 18 courses; testing activity by activity showed the cause is specific quizzes (most likely damaged by Moodle 5's question-bank migration, see MDL-85210 and MDL-86691), while every other activity answers fine. Moodle checks all activities in one pass, so one bad quiz fails the course. On that error the server now uses `core_course_check_updates`, the same read-only code for named activities: other activities in one batch (up to 300, sent in the POST body; a failing batch is split in half until the broken one stands alone), then all quizzes not yet proven fine in one batch, and one by one only if that batch fails. What it learns is kept for a day, in memory and as one note in the approval store (Durable Object on Workers, SQLite on Node), so a fresh isolate doesn't start over and later calls take one or two requests per course. Budget: at most 25 such calls for one course (`moodle_get_updates_since`, `/api/call`) and 10 shared across all courses in `moodle_get_all_updates_since` (at most 4 single-quiz checks per course there), because a Worker on the free plan may make only about 50 outgoing requests per invocation. Courses are worked through one at a time; a course the remaining budget can't cover falls back to file times and is narrowed down on a later call, and activities left over are counted as `notchecked`.
+- Only Moodle's `dmlreadexception` starts the fallback or marks an activity broken; other Moodle errors, HTTP failures and the rate brake are passed on as before. The token is now the first field of every request body.
+- `moodle_get_updates_since` lists skipped activities in `warnings` (`merlinerror` / `notchecked`). `moodle_get_all_updates_since` lists them once in `skipped_activities` (per course: `broken` and `not_checked_yet`) and shows real changes for those courses instead of only new files; the file-time fallback stays as a last resort.
+- `/api/call` with `core_course_get_updates_since` (courseid and since only) goes through the same fallback, so scripts get it without changes. `core_course_check_updates` is not on the `/api/call` list itself.
+
 ## 0.5.0 (2026-11-16)
 
 - `moodle_get_quiz_details`: quiz rules without starting an attempt (open/close, time limit, attempts allowed, used and left, grading method, max grade).

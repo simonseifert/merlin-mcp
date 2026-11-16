@@ -152,6 +152,13 @@ function noteOverload(res: Response): void {
 	coolUntil = Date.now() + (Number.isFinite(ra) && ra > 0 ? Math.min(ra, 600) : 60) * 1000;
 }
 
+/** An exception Moodle itself answered with (as opposed to HTTP or network errors). */
+export class MoodleApiError extends Error {
+	constructor(message: string, readonly errorcode: string) {
+		super(message);
+	}
+}
+
 async function moodleCall<T = unknown>(
 	env: Env,
 	wsfunction: string,
@@ -165,6 +172,8 @@ async function moodleCall<T = unknown>(
 	// never in a URL that could end up in a log. Read params stay in the query (Moodle
 	// merges $_GET and $_POST); moodle_send_message also keeps its text in the body.
 	const body = new URLSearchParams();
+	// Token first, so a server that caps the number of form fields never drops it.
+	body.set('wstoken', token);
 	const target = method === 'POST' ? body : url.searchParams;
 	for (const [k, v] of Object.entries(params)) {
 		// wstoken/wsfunction/moodlewsrestformat are always set below, from
@@ -174,7 +183,6 @@ async function moodleCall<T = unknown>(
 	}
 	url.searchParams.set('moodlewsrestformat', 'json');
 	url.searchParams.set('wsfunction', wsfunction);
-	body.set('wstoken', token);
 
 	const init: RequestInit = {
 		method: 'POST',
@@ -207,7 +215,7 @@ async function moodleCall<T = unknown>(
 				'Moodle rejected the token (invalidtoken): it has expired or was revoked, or it belongs to another academic year. Get a fresh token (README, "Getting your token") and update MOODLE_TOKEN, or MOODLE_TOKENS for that year.'
 			);
 		}
-		throw new Error(`Moodle error: ${redactSecret(String(json.message ?? json.exception), secrets)}`);
+		throw new MoodleApiError(`Moodle error: ${redactSecret(String(json.message ?? json.exception), secrets)}`, String((json as { errorcode?: string }).errorcode ?? ''));
 	}
 	return json as T;
 }
@@ -234,6 +242,7 @@ export function __resetCaches(): void {
 	recentCalls.length = 0;
 	coolUntil = 0;
 	cache.clear();
+	updateHealth.clear();
 }
 
 const TEN_MIN = 10 * 60_000;
@@ -340,6 +349,217 @@ function getModuleIndex(env: Env, year: string, courseId: number): Promise<Map<n
 		}
 		return idx;
 	});
+}
+
+// ---------- Updates that survive broken activities ----------
+//
+// Moodle's core_course_get_updates_since checks every activity in one pass with
+// no per-activity error handling, so one activity whose own query fails (on
+// Merlin: some quizzes, most likely damaged by the Moodle 5 question-bank
+// migration) makes the whole course answer "Error reading from database".
+// core_course_check_updates runs the same read-only code for the activities you
+// name (course/lib.php course_check_updates), so on that error we check the
+// course in batches, skip the activities that fail on their own, and remember
+// them for a day so later calls cost one or two requests again.
+
+type UpdatesResult = { instances: Array<Record<string, unknown>>; warnings: Array<Record<string, unknown>> };
+
+const DAY_MS = 24 * 60 * 60_000;
+/** Activities per check_updates call; the list goes in the POST body, so a whole course fits in one. */
+const CHECK_BATCH = 300; // 3 form fields each, under PHP's default max_input_vars of 1000
+/**
+ * check_updates calls the fallback may spend. Workers on the free plan allow about 50
+ * outgoing requests per invocation, and the all-courses tool already spends most of
+ * them on its normal calls, so it shares a small budget across every course; what is
+ * learned is cached for a day, so later calls finish the job.
+ */
+export const UPDATES_PROBE_BUDGET = 25;
+export const ALL_UPDATES_PROBE_BUDGET = 10;
+
+/** The fallback had no budget left to start on this course. */
+export class ProbeBudgetError extends Error {}
+
+/** Per year+course: activities that fail on their own, and those already proven fine (cached a day). */
+const updateHealth = new Map<string, { bad: Set<number>; good: Set<number>; expires: number }>();
+
+// The same map is kept in the approval store (one note), so a fresh Worker isolate
+// doesn't start the search over. Best effort: if the store is missing or fails,
+// the in-memory map still works.
+type StoredHealth = Record<string, { bad: number[]; good: number[]; expires: number }>;
+const HEALTH_NOTE = 'update-health';
+
+/** Union what another isolate learned into memory: an activity is bad only if nobody has seen it pass. */
+function mergeStoredHealth(stored: StoredHealth | undefined): void {
+	for (const [k, v] of Object.entries(stored ?? {})) {
+		if (!(v.expires > Date.now())) continue;
+		const mine = updateHealth.get(k);
+		if (!mine || mine.expires <= Date.now()) {
+			updateHealth.set(k, { bad: new Set(v.bad), good: new Set(v.good), expires: v.expires });
+			continue;
+		}
+		for (const id of v.good) mine.good.add(id);
+		for (const id of v.bad) if (!mine.good.has(id)) mine.bad.add(id);
+		for (const id of mine.good) mine.bad.delete(id);
+		mine.expires = Math.max(mine.expires, v.expires);
+	}
+}
+
+function loadHealth(env: Env): Promise<void> {
+	return cached('update-health-loaded', 60_000, async () => {
+		try {
+			mergeStoredHealth((await approvals(env).getNote(HEALTH_NOTE)) as StoredHealth | undefined);
+		} catch {
+			// no store (tests, stdio) or a store error: memory only
+		}
+	});
+}
+
+/** Read, merge, write: never overwrite what another isolate stored with a narrower view. */
+async function saveHealth(env: Env): Promise<void> {
+	try {
+		const store = approvals(env);
+		mergeStoredHealth((await store.getNote(HEALTH_NOTE)) as StoredHealth | undefined);
+		const out: StoredHealth = {};
+		for (const [k, v] of updateHealth) {
+			if (v.expires > Date.now() && (v.bad.size || v.good.size)) out[k] = { bad: [...v.bad], good: [...v.good], expires: v.expires };
+		}
+		await store.putNote(HEALTH_NOTE, out, DAY_MS);
+	} catch {
+		// best effort
+	}
+}
+
+function healthFor(key: string) {
+	const hit = updateHealth.get(key);
+	if (hit && hit.expires > Date.now()) return hit;
+	const fresh = { bad: new Set<number>(), good: new Set<number>(), expires: Date.now() + DAY_MS };
+	updateHealth.set(key, fresh);
+	return fresh;
+}
+
+/** Only Moodle's own "Error reading from database" answer means an activity's query is broken; anything else is passed on. */
+const isDbReadError = (err: unknown) => err instanceof MoodleApiError && err.errorcode === 'dmlreadexception';
+
+/** Shared by every course one tool call touches: how many check_updates calls are left, and a queue so fallbacks run one at a time. */
+export type ProbeBudget = { left: number; lock: Promise<unknown>; maxSinglesPerCourse: number };
+export const probeBudget = (left: number, maxSinglesPerCourse = left): ProbeBudget => ({ left, lock: Promise.resolve(), maxSinglesPerCourse });
+
+async function courseUpdatesSince(env: Env, year: string, courseId: number, since: number, budget: ProbeBudget): Promise<UpdatesResult> {
+	const key = `${year}:${courseId}`;
+	await loadHealth(env);
+	const known = updateHealth.get(key);
+	if (!known || known.expires <= Date.now() || !known.bad.size) {
+		try {
+			const data = await moodleCall<Partial<UpdatesResult>>(env, 'core_course_get_updates_since', { courseid: courseId, since }, year);
+			return { instances: data.instances ?? [], warnings: data.warnings ?? [] };
+		} catch (err) {
+			if (!isDbReadError(err)) throw err;
+		}
+	}
+	// One course at a time, so each one either gets enough budget to finish its
+	// basic checks or none at all (and falls back to file times in the caller).
+	const run = budget.lock.then(async () => {
+		const { result, changed } = await checkCourseByActivity(env, year, courseId, since, budget);
+		if (changed) await saveHealth(env);
+		return result;
+	});
+	budget.lock = run.catch(() => undefined);
+	return run;
+}
+
+async function checkCourseByActivity(env: Env, year: string, courseId: number, since: number, budget: ProbeBudget): Promise<{ result: UpdatesResult; changed: boolean }> {
+	const idx = await getModuleIndex(env, year, courseId);
+	const health = healthFor(`${year}:${courseId}`);
+	const before = `${[...health.bad].sort()}|${[...health.good].sort()}`;
+	const todo = [...idx.keys()].filter((id) => !health.bad.has(id));
+	// Activities already proven fine and non-quiz ones go in big batches. Quizzes not
+	// yet proven are the usual suspects: one batch for all of them, and only if that
+	// fails, one call each.
+	const suspects = todo.filter((id) => idx.get(id)?.modname === 'quiz' && !health.good.has(id));
+	const rest = todo.filter((id) => !suspects.includes(id));
+	const minimum = Math.ceil(rest.length / CHECK_BATCH) + (suspects.length ? 1 : 0);
+	if (budget.left < minimum) throw new ProbeBudgetError('Merlin errored on this course and this call has no budget left to check it activity by activity; it is narrowed down on a later call.');
+
+	const instances: Array<Record<string, unknown>> = [];
+	const warnings: Array<Record<string, unknown>> = [];
+	let unchecked = 0;
+	const check = async (ids: number[]): Promise<'ok' | 'fail' | 'skipped'> => {
+		if (budget.left <= 0) {
+			unchecked += ids.length;
+			return 'skipped';
+		}
+		budget.left--;
+		const params: Record<string, string | number> = { courseid: courseId };
+		ids.forEach((id, i) => {
+			params[`tocheck[${i}][contextlevel]`] = 'module';
+			params[`tocheck[${i}][id]`] = id;
+			params[`tocheck[${i}][since]`] = since;
+		});
+		try {
+			const data = await moodleCall<Partial<UpdatesResult>>(env, 'core_course_check_updates', params, year, 'POST');
+			instances.push(...(data.instances ?? []));
+			warnings.push(...(data.warnings ?? []));
+			ids.forEach((id) => {
+				// Only quizzes are ever suspects, so only they need remembering as fine.
+				if (idx.get(id)?.modname === 'quiz') health.good.add(id);
+				health.bad.delete(id);
+			});
+			return 'ok';
+		} catch (err) {
+			if (!isDbReadError(err)) throw err;
+			return 'fail';
+		}
+	};
+	// Split a failing group in half until each failing activity stands alone.
+	const bisect = async (ids: number[]): Promise<void> => {
+		if ((await check(ids)) !== 'fail') return;
+		if (ids.length === 1) {
+			health.bad.add(ids[0]);
+			return;
+		}
+		const mid = Math.ceil(ids.length / 2);
+		await bisect(ids.slice(0, mid));
+		await bisect(ids.slice(mid));
+	};
+
+	for (let i = 0; i < rest.length; i += CHECK_BATCH) await bisect(rest.slice(i, i + CHECK_BATCH));
+	if (suspects.length) {
+		const r = suspects.length > 1 ? await check(suspects) : 'fail';
+		if (r === 'fail') {
+			// A few single checks per course per call, so one course can't eat the whole
+			// budget; the rest are counted as not checked yet and finished on later calls.
+			let singles = 0;
+			for (const id of suspects) {
+				if (singles >= budget.maxSinglesPerCourse) {
+					unchecked++;
+					continue;
+				}
+				singles++;
+				if ((await check([id])) === 'fail') health.bad.add(id);
+			}
+		}
+	}
+
+	for (const id of health.bad) {
+		if (!idx.has(id)) continue;
+		warnings.push({
+			item: 'module',
+			itemid: id,
+			warningcode: 'merlinerror',
+			message: `Merlin answers "Error reading from database" for this activity (${idx.get(id)?.modname ?? 'activity'} "${idx.get(id)?.name ?? id}"), so its changes can't be listed. Everything else in the course was checked.`,
+		});
+	}
+	if (unchecked) {
+		warnings.push({
+			item: 'course',
+			itemid: courseId,
+			warningcode: 'notchecked',
+			message: `${unchecked} activit${unchecked === 1 ? 'y' : 'ies'} not checked yet: the call budget ran out working around Merlin errors. They are checked on a later call.`,
+			count: unchecked,
+		});
+	}
+	const changed = `${[...health.bad].sort()}|${[...health.good].sort()}` !== before;
+	return { result: { instances, warnings }, changed };
 }
 
 const sinceParams = {
@@ -1327,7 +1547,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 	// 13. Cheap change detection
 	readTool(
 		'moodle_get_updates_since',
-		'Cheap change detection: list what changed in a course since N hours ago, without re-fetching the whole content tree.',
+		'Cheap change detection: list what changed in a course since N hours ago, without re-fetching the whole content tree. Activities Merlin itself can\'t check (some quizzes answer with a database error) are skipped and listed in `warnings`.',
 		{
 			course_id: z.number().int(),
 			hours_ago: z.number().min(0.1).max(24 * 90).default(24),
@@ -1336,7 +1556,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		async ({ course_id, hours_ago, year }) => {
 			const y = await courseYear(env(), course_id, year);
 			const since = Math.floor(Date.now() / 1000) - Math.round(hours_ago * 3600);
-			const data = await moodleCall<Record<string, unknown>>(env(), 'core_course_get_updates_since', { courseid: course_id, since }, y);
+			const data = await courseUpdatesSince(env(), y, course_id, since, probeBudget(UPDATES_PROBE_BUDGET));
 			return toToolResult({ year: y, course_id, ...data });
 		}
 	);
@@ -1558,7 +1778,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 	// 20. What changed, across every course
 	readTool(
 		'moodle_get_all_updates_since',
-		'What changed in every enrolled course since a time, in one call: per course, each changed activity with its name, type and section, and what changed (e.g. configuration, contentfiles, posts). Courses where Merlin can\'t list updates are marked `partial` and show only new or changed files. Courses with nothing new are left out. Read-only; nothing is marked viewed.',
+		'What changed in every enrolled course since a time, in one call: per course, each changed activity with its name, type and section, and what changed (e.g. configuration, contentfiles, posts). Activities Merlin itself fails on (some quizzes) are skipped and listed in `skipped_activities`; everything else in those courses is still checked. Courses with nothing new are left out. Read-only; nothing is marked viewed.',
 		{
 			...sinceParams,
 			hours_ago: z.number().min(0.1).max(24 * 90).default(24).describe('Look back this many hours (ignored when `since` is given)'),
@@ -1566,18 +1786,21 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		},
 		async (args) => {
 			const since = sinceFrom(args);
+			const budget = probeBudget(ALL_UPDATES_PROBE_BUDGET, 4);
 			const fan = await fanOut(await yearsFor(env(), args.year), async (y) => {
 				const courses = await getCourses(env(), y);
 				const perCourse = await mapLimit(courses, 6, async (c) => {
 					const emptyIdx = () => new Map<number, ModInfo>();
 					let instances: Array<Record<string, unknown>>;
+					let skipped: Array<Record<string, unknown>> = [];
 					try {
-						const data = await moodleCall<{ instances?: Array<Record<string, unknown>> }>(env(), 'core_course_get_updates_since', { courseid: c.id, since }, y);
-						instances = (data.instances ?? []).filter((i) => i.contextlevel === 'module');
+						const data = await courseUpdatesSince(env(), y, c.id, since, budget);
+						instances = data.instances.filter((i) => i.contextlevel === 'module');
+						skipped = data.warnings.filter((w) => w.warningcode === 'merlinerror' || w.warningcode === 'notchecked');
 					} catch (err) {
 						rethrowRateLimit(err);
-						// Merlin's updates_since fails with a database error on some courses. Fall back to
-						// file times from the content tree: catches new and changed files, not other edits.
+						// Last resort when even the per-activity check fails: file times from the
+						// content tree catch new and changed files, not other edits.
 						const idx = await getModuleIndex(env(), y, c.id).catch((err) => {
 							rethrowRateLimit(err);
 							return emptyIdx();
@@ -1603,15 +1826,20 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 							},
 						];
 					}
-					if (!instances.length) return [];
+					if (!instances.length && !skipped.length) return [];
 					const idx = await getModuleIndex(env(), y, c.id).catch((err) => {
-							rethrowRateLimit(err);
-							return emptyIdx();
-						});
+						rethrowRateLimit(err);
+						return emptyIdx();
+					});
+					const broken = skipped.filter((w) => w.warningcode === 'merlinerror').map((w) => ({ cmid: w.itemid, name: idx.get(Number(w.itemid))?.name, type: idx.get(Number(w.itemid))?.modname }));
+					const notChecked = skipped.filter((w) => w.warningcode === 'notchecked').reduce((n, w) => n + (Number(w.count) || 0), 0);
+					const skippedOut = skipped.length ? { broken: broken.length ? broken : undefined, not_checked_yet: notChecked || undefined } : undefined;
+					if (!instances.length) return [{ courseid: c.id, course: c.fullname, changes: [], skipped: skippedOut }];
 					return [
 						{
 							courseid: c.id,
 							course: c.fullname,
+							skipped: skippedOut,
 							changes: instances.map((i) => {
 								const m = idx.get(Number(i.id));
 								const ups = (i.updates as Array<Record<string, unknown>> | undefined) ?? [];
@@ -1632,8 +1860,20 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 			// Partial courses with no changed files carry no information beyond "couldn't check": list them once.
 			const isEmptyPartial = (c: { changes: unknown[] }) => 'partial' in c && !c.changes.length;
 			const partialOnly = fan.items.filter(isEmptyPartial);
-			const items = fan.items.filter((c) => !isEmptyPartial(c));
+			// Skipped activities are listed once at the top, not as a course entry on every call.
+			const skippedAll: Array<Record<string, unknown>> = [];
+			for (const c of fan.items) {
+				if ('skipped' in c && c.skipped) {
+					skippedAll.push({ course: c.course, year: c.year, ...c.skipped });
+					delete (c as { skipped?: unknown }).skipped;
+				}
+			}
+			const items = fan.items.filter((c) => !isEmptyPartial(c) && c.changes.length);
 			const result: Record<string, unknown> = { ...listResult(fan, items), since, since_local: zagrebTime(since) };
+			if (skippedAll.length) {
+				result.skipped_activities = skippedAll;
+				result.skipped_note = '`broken`: activities (quizzes) Merlin itself fails on; changes inside them can\'t be listed, everything else in the course was checked. `not_checked_yet`: quizzes not narrowed down yet in this call, finished on a later call. Quiz deadlines and your attempts still come from moodle_get_quiz_details.';
+			}
 			if (partialOnly.length) {
 				result.not_fully_checked = partialOnly.map((c) => `${c.course} (${c.year})`);
 				result.not_fully_checked_note = 'Merlin could not list updates for these courses and none of their files changed; other edits (new forum posts, quizzes) may be missing. Use moodle_get_new_forum_posts for announcements.';
@@ -1850,6 +2090,20 @@ export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: P
 		}
 		Object.assign(params, forced);
 		try {
+			// Plain updates_since (no area filter) goes through the per-activity fallback, so one
+			// broken quiz no longer fails the whole course; skipped activities come back in `warnings`.
+			const keys = Object.keys(params);
+			const yearParam = url.searchParams.get('year') ?? undefined;
+			if (
+				fn === 'core_course_get_updates_since' &&
+				keys.every((k) => k === 'courseid' || k === 'since') &&
+				/^\d+$/.test(params.courseid ?? '') &&
+				/^\d+$/.test(params.since ?? '') &&
+				(yearParam !== undefined || !env.MOODLE_URL)
+			) {
+				const y = yearParam ?? currentYear(env);
+				return jsonResponse(withoutCredentials(await courseUpdatesSince(env, y, Number(params.courseid), Number(params.since), probeBudget(UPDATES_PROBE_BUDGET))));
+			}
 			return jsonResponse(withoutCredentials(await moodleCall(env, fn, params, url.searchParams.get('year') ?? undefined)));
 		} catch (err) {
 			return errorResponse(err, env);

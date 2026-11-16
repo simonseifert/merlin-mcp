@@ -27,6 +27,12 @@ export class ApprovalStore extends DurableObject implements ApprovalsApi {
 	finish(id: string, result: { msgid: number } | { error: string; ambiguous?: boolean }): Promise<void> {
 		return this.logic.finish(id, result);
 	}
+	getNote(key: string): Promise<unknown> {
+		return this.logic.getNote(key);
+	}
+	putNote(key: string, value: unknown, ttlMs: number): Promise<void> {
+		return this.logic.putNote(key, value, ttlMs);
+	}
 }
 
 

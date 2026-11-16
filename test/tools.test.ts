@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { __resetCaches } from '../src/app.js';
+import { Approvals, type KvStorage } from '../src/approvals.js';
 
 // tools/call coverage for every MCP tool, through the real /mcp route with a
 // mocked Moodle. All data below is fake ("Test Student", course TEST101).
@@ -161,6 +162,8 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 				: { exception: 'moodle_exception', message: 'Attempt not found' };
 		case 'core_course_get_updates_since':
 			return { instances: [{ contextlevel: 'module', id: 100, updates: [{ name: 'configuration', timeupdated: 1 }] }], warnings: [] };
+		case 'core_course_check_updates':
+			return { instances: [], warnings: [] };
 		default:
 			throw new Error(`unmocked wsfunction ${fn} (${p.toString()})`);
 	}
@@ -556,8 +559,9 @@ describe('guard: the MCP surface stays read-only', () => {
 		const offenders = [...sent].filter((f) => WRITE_VERB.test(f));
 		expect(offenders).toEqual([]);
 		expect(sent.has('core_message_send_instant_messages')).toBe(false);
-		// Every function a tool calls is a getter.
-		expect([...sent].filter((f) => !/_get_/.test(f))).toEqual([]);
+		// Every function a tool calls is a getter, except core_course_check_updates: the
+		// per-activity form of get_updates_since, same read-only code (course_check_updates).
+		expect([...sent].filter((f) => !/_get_/.test(f) && f !== 'core_course_check_updates')).toEqual([]);
 	});
 });
 
@@ -759,11 +763,12 @@ describe('moodle_get_choices', () => {
 });
 
 describe('moodle_get_all_updates_since', () => {
-	it('names changed modules per course and falls back to file times when Merlin errors', async () => {
+	it('names changed modules per course and falls back to file times when even the per-activity check fails', async () => {
 		overrides.core_course_get_updates_since = (_y, p) =>
 			p.get('courseid') === '20'
 				? { exception: 'dml_read_exception', message: 'Pogreška pri čitanju iz baze podataka' }
 				: { instances: [{ contextlevel: 'module', id: 100, updates: [{ name: 'posts', timeupdated: 4000 }] }], warnings: [] };
+		overrides.core_course_check_updates = () => new Response('upstream down', { status: 500 });
 		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 1 });
 		const c10 = data.items.find((c: any) => c.courseid === 10);
 		expect(c10.changes[0]).toMatchObject({ cmid: 100, name: 'Announcements', type: 'forum', section: 'General', what: ['posts'] });
@@ -775,9 +780,181 @@ describe('moodle_get_all_updates_since', () => {
 
 	it('lists partial courses with no file changes once instead of as empty items', async () => {
 		overrides.core_course_get_updates_since = () => ({ exception: 'dml_read_exception', message: 'Pogreška pri čitanju iz baze podataka' });
+		overrides.core_course_check_updates = () => new Response('upstream down', { status: 500 });
 		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 10 });
 		expect(data.items).toEqual([]);
 		expect(data.not_fully_checked).toEqual(['Test Course 101 (2026-2027)', 'Test Course 202 (2026-2027)']);
+	});
+});
+
+describe('updates that survive broken quizzes (v0.5.1)', () => {
+	const DB_ERR = { exception: 'dml_read_exception', errorcode: 'dmlreadexception', message: 'Pogreška pri čitanju iz baze podataka' };
+	const tocheckIds = (p: URLSearchParams) => [...p.entries()].filter(([k]) => /^tocheck\[\d+\]\[id\]$/.test(k)).map(([, v]) => Number(v));
+	const contentsWithQuizzes = (quizIds: number[]) => () => [
+		{
+			id: 1,
+			name: 'General',
+			modules: [
+				{ id: 100, name: 'Announcements', modname: 'forum' },
+				{ id: 101, name: 'Slides', modname: 'resource', contents: [] },
+				...quizIds.map((id) => ({ id, name: `Quiz ${id}`, modname: 'quiz' })),
+			],
+		},
+	];
+	const brokenQuiz = (bad: number[]) => (_y: string, p: URLSearchParams) => {
+		const ids = tocheckIds(p);
+		if (ids.some((id) => bad.includes(id))) return DB_ERR;
+		return { instances: ids.filter((id) => id === 100).map((id) => ({ contextlevel: 'module', id, updates: [{ name: 'posts', timeupdated: 5 }] })), warnings: [] };
+	};
+
+	beforeEach(() => {
+		overrides.core_course_get_updates_since = (_y, p) => (p.get('courseid') === '20' ? DB_ERR : { instances: [], warnings: [] });
+		overrides.core_course_get_contents = contentsWithQuizzes([102, 103]);
+		overrides.core_course_check_updates = brokenQuiz([102]);
+	});
+
+	it('per-course tool: checks activities in batches, skips the quiz Merlin fails on, keeps the rest', async () => {
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(data.instances.map((i: any) => i.id)).toEqual([100]);
+		const w = data.warnings.find((x: any) => x.itemid === 102);
+		expect(w).toMatchObject({ warningcode: 'merlinerror' });
+		expect(w.message).toMatch(/Quiz 102/);
+		expect(data.warnings.some((x: any) => x.itemid === 103)).toBe(false);
+		const batches = calls.filter((c) => c.fn === 'core_course_check_updates').map((c) => tocheckIds(c.params));
+		expect(batches).toEqual([[100, 101], [102, 103], [102], [103]]);
+	});
+
+	it('all-courses tool: a course the remaining budget cannot cover falls back to file times', async () => {
+		const many = Array.from({ length: 12 }, (_, i) => 200 + i);
+		overrides.core_course_get_contents = contentsWithQuizzes(many);
+		overrides.core_course_check_updates = brokenQuiz(many);
+		overrides.core_course_get_updates_since = () => DB_ERR;
+		const { data } = await callTool('moodle_get_all_updates_since', { year: 'all', since: 1 }); // three courses
+		expect(calls.filter((c) => c.fn === 'core_course_check_updates').length).toBe(10);
+		expect(data.not_fully_checked).toHaveLength(1);
+		expect(data.errors).toBeUndefined();
+	});
+
+	it('remembers the broken quiz: the next call skips updates_since and needs one batch', async () => {
+		await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		calls.length = 0;
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(calls.some((c) => c.fn === 'core_course_get_updates_since')).toBe(false);
+		const batches = calls.filter((c) => c.fn === 'core_course_check_updates').map((c) => tocheckIds(c.params));
+		expect(batches).toEqual([[100, 101, 103]]);
+		expect(data.warnings.find((x: any) => x.itemid === 102)).toBeTruthy();
+	});
+
+	it('bisects a failing non-quiz batch down to the one broken activity', async () => {
+		overrides.core_course_check_updates = brokenQuiz([101]);
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(data.warnings.filter((x: any) => x.warningcode === 'merlinerror').map((x: any) => x.itemid)).toEqual([101]);
+		expect(data.instances.map((i: any) => i.id)).toEqual([100]);
+	});
+
+	it('stops at the call budget and says what was not checked', async () => {
+		const many = Array.from({ length: 70 }, (_, i) => 200 + i);
+		overrides.core_course_get_contents = contentsWithQuizzes(many);
+		overrides.core_course_check_updates = brokenQuiz(many);
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		const n = calls.filter((c) => c.fn === 'core_course_check_updates').length;
+		expect(n).toBe(25); // rest batch, quiz batch, then 23 single quizzes
+		expect(data.warnings.filter((x: any) => x.warningcode === 'merlinerror')).toHaveLength(23);
+		expect(data.warnings.filter((x: any) => x.warningcode === 'notchecked')).toEqual([expect.objectContaining({ item: 'course', itemid: 20, count: 47 })]);
+	});
+
+	it('all-courses tool: lists the skipped quiz once at the top, and the course keeps its real changes', async () => {
+		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 1 });
+		const c20 = data.items.find((c: any) => c.courseid === 20);
+		expect(c20.partial).toBeUndefined();
+		expect(c20.changes[0]).toMatchObject({ cmid: 100, name: 'Announcements', what: ['posts'] });
+		expect(c20.skipped).toBeUndefined();
+		expect(data.skipped_activities).toEqual([{ course: 'Test Course 202', year: Y26, broken: [{ cmid: 102, name: 'Quiz 102', type: 'quiz' }] }]);
+		expect(data.not_fully_checked).toBeUndefined();
+	});
+
+	it('one call for all quizzes when none of them is broken', async () => {
+		overrides.core_course_check_updates = brokenQuiz([]);
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		const batches = calls.filter((c) => c.fn === 'core_course_check_updates').map((c) => tocheckIds(c.params));
+		expect(batches).toEqual([[100, 101], [102, 103]]);
+		expect(data.warnings).toEqual([]);
+	});
+
+	it('all-courses tool: shares the budget (at most 4 single quiz checks per course) and counts the rest', async () => {
+		const many = Array.from({ length: 12 }, (_, i) => 200 + i);
+		overrides.core_course_get_contents = contentsWithQuizzes(many);
+		overrides.core_course_check_updates = brokenQuiz(many);
+		overrides.core_course_get_updates_since = () => DB_ERR; // both courses fail
+		const { data } = await callTool('moodle_get_all_updates_since', { year: Y26, since: 1 });
+		expect(calls.filter((c) => c.fn === 'core_course_check_updates').length).toBeLessThanOrEqual(10);
+		// First course: rest batch, quiz batch, 4 singles (6). Second: rest, quiz batch, 2 singles (4).
+		const byBroken = data.skipped_activities.map((x: any) => [x.broken.length, x.not_checked_yet]).sort();
+		expect(byBroken).toEqual([[2, 10], [4, 8]]);
+		expect(data.not_fully_checked).toBeUndefined();
+		expect(data.errors).toBeUndefined();
+	});
+
+	it('what it learned survives a fresh isolate through the approval store', async () => {
+		const m = new Map<string, unknown>();
+		const kv: KvStorage = {
+			get: async (k) => m.get(k) as any,
+			put: async (k, v) => void m.set(k, v),
+			delete: async (k) => m.delete(k),
+			list: async ({ prefix }) => new Map([...m].filter(([k]) => k.startsWith(prefix))) as any,
+		};
+		const store = new Approvals(kv);
+		const env = { ...ENV, APPROVALS: { idFromName: () => 'a', get: () => store } };
+		await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 }, env);
+		expect(await store.getNote('update-health')).toMatchObject({ [`${Y26}:20`]: { bad: [102] } });
+		__resetCaches(); // a new isolate: memory is empty, the store is not
+		calls.length = 0;
+		const { data } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 }, env);
+		expect(calls.some((c) => c.fn === 'core_course_get_updates_since')).toBe(false);
+		expect(calls.filter((c) => c.fn === 'core_course_check_updates').map((c) => tocheckIds(c.params))).toEqual([[100, 101, 103]]);
+		expect(data.warnings.find((x: any) => x.itemid === 102).warningcode).toBe('merlinerror');
+	});
+
+	it('other Moodle errors and HTTP failures are passed on, never recorded as broken activities', async () => {
+		overrides.core_course_check_updates = () => ({ exception: 'required_capability_exception', errorcode: 'nopermissions', message: 'No permission' });
+		const r1 = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(r1.isError).toBe(true);
+		expect(r1.text).toMatch(/No permission/);
+		overrides.core_course_check_updates = () => new Response('upstream down', { status: 500 });
+		const r2 = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(r2.isError).toBe(true);
+		// Nothing was learned, so the next call starts with updates_since again.
+		overrides.core_course_check_updates = brokenQuiz([102]);
+		calls.length = 0;
+		await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(calls[0]?.fn === 'core_course_get_updates_since' || calls.some((c) => c.fn === 'core_course_get_updates_since')).toBe(true);
+	});
+
+	it('a different Moodle error from updates_since is not worked around', async () => {
+		overrides.core_course_get_updates_since = () => ({ exception: 'moodle_exception', errorcode: 'invalidrecord', message: 'Course not found' });
+		const r = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(r.isError).toBe(true);
+		expect(calls.some((c) => c.fn === 'core_course_check_updates')).toBe(false);
+	});
+
+	it('the rate brake still stops the call instead of being folded into skipped activities', async () => {
+		overrides.core_course_check_updates = () => new Response('slow down', { status: 429, headers: { 'Retry-After': '30' } });
+		const { isError } = await callTool('moodle_get_updates_since', { course_id: 20, year: Y26 });
+		expect(isError).toBe(true);
+	});
+
+	it('/api/call: plain updates_since goes through the fallback; with a filter it passes straight through', async () => {
+		const api = (q: string) =>
+			worker.fetch(new Request(`https://merlin-mcp.example/api/call?${q}`, { headers: { Authorization: 'Bearer the-api-secret' } }), ENV, ctx);
+		const ok = await api(`wsfunction=core_course_get_updates_since&courseid=20&since=1&year=${Y26}`);
+		expect(ok.status).toBe(200);
+		const body: any = await ok.json();
+		expect(body.instances.map((i: any) => i.id)).toEqual([100]);
+		expect(body.warnings.find((x: any) => x.itemid === 102).warningcode).toBe('merlinerror');
+		const raw = await api(`wsfunction=core_course_get_updates_since&courseid=20&since=1&filter[0]=fileareas&year=${Y26}`);
+		expect(raw.status).toBe(502);
+		const direct = await api(`wsfunction=core_course_check_updates&courseid=20&year=${Y26}`);
+		expect(direct.status).toBe(400);
 	});
 });
 

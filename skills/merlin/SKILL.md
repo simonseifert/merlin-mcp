@@ -19,7 +19,7 @@ Each academic year is a separate Moodle, and ids are only unique within one year
 | Assignment status, due dates, grader comments | `moodle_get_assignments` |
 | Grades and feedback | `moodle_get_grades` (`course_id` optional) |
 | What is new (bell icon)? | `moodle_get_notifications` (`unread_only=true` for fresh) |
-| What changed anywhere lately? | `moodle_get_all_updates_since` (every course, with activity names; `not_fully_checked` lists courses Merlin can't report) |
+| What changed anywhere lately? | `moodle_get_all_updates_since` (every course, with activity names; `skipped_activities` lists the few quizzes Merlin itself fails on, everything else is checked) |
 | What changed in one course? | `moodle_get_updates_since`, then `moodle_get_course_contents` if needed |
 | What is in a course (sections, modules)? | `moodle_get_course_contents` |
 | Course files, download links | `moodle_list_files` |

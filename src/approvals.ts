@@ -78,12 +78,29 @@ export interface ApprovalsApi {
 	list(): Promise<PendingSend[]>;
 	claim(id: string, key: string, action: 'approve' | 'reject'): Promise<ClaimResult>;
 	finish(id: string, result: { msgid: number } | { error: string; ambiguous?: boolean }): Promise<void>;
+	/** Small shared notes with an expiry (not send-related): e.g. which Merlin activities fail on their own. */
+	getNote(key: string): Promise<unknown>;
+	putNote(key: string, value: unknown, ttlMs: number): Promise<void>;
 }
 
 export class Approvals implements ApprovalsApi {
 	private queue: Promise<unknown> = Promise.resolve();
 
 	constructor(private readonly store: KvStorage) {}
+
+	async getNote(key: string): Promise<unknown> {
+		const note = await this.store.get<{ value: unknown; expires: number }>(`n:${key}`);
+		if (!note) return undefined;
+		if (note.expires <= Date.now()) {
+			await this.store.delete(`n:${key}`);
+			return undefined;
+		}
+		return note.value;
+	}
+
+	async putNote(key: string, value: unknown, ttlMs: number): Promise<void> {
+		await this.store.put(`n:${key}`, { value, expires: Date.now() + ttlMs });
+	}
 
 	/** Runs fn after every earlier serial() call has finished (an in-object mutex). */
 	private serial<T>(fn: () => Promise<T>): Promise<T> {

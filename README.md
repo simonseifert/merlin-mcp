@@ -42,8 +42,8 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_get_my_groups` | core_group_get_course_user_groups | your groups per course (groupings are teacher-only in Moodle) |
 | `moodle_get_new_forum_posts` | mod_forum_get_forums_by_courses, mod_forum_get_forum_discussions | new discussions since a time across every course, announcement forums by default; marks nothing read |
 | `moodle_get_choices` | mod_choice_get_choices_by_courses, mod_choice_get_choice_options | sign-ups and polls: open/close, options with how full they are, your pick; never answers |
-| `moodle_get_all_updates_since` | core_course_get_updates_since, core_course_get_contents | what changed in every course since a time, with activity names; courses where Merlin errors fall back to new files |
-| `moodle_get_updates_since` | core_course_get_updates_since | cheap "what changed in the last N hours" |
+| `moodle_get_all_updates_since` | core_course_get_updates_since, core_course_check_updates, core_course_get_contents | what changed in every course since a time, with activity names; activities Merlin itself fails on (some quizzes) are skipped and listed |
+| `moodle_get_updates_since` | core_course_get_updates_since, core_course_check_updates | cheap "what changed in the last N hours"; skips activities Merlin fails on |
 | `moodle_get_recent_forum_posts` | mod_forum_get_forum_discussions | latest discussions in a forum |
 | `moodle_get_forum_discussion` | mod_forum_get_discussion_posts | full text of one thread (marks it read, like a browser) |
 | `moodle_get_grades` | gradereport_user_get_grade_items | grades and feedback, for one course or all |
