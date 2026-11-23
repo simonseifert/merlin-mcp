@@ -217,7 +217,25 @@ function call(fn, p, year, origin) {
 		case 'core_course_get_updates_since':
 			return { instances: [{ contextlevel: 'module', id: 2000 + d.assignments[0].id, updates: [{ name: 'configuration', timeupdated: at(0, 8) }] }], warnings: [] };
 		case 'core_course_get_courses_by_field':
-			return { courses: [{ ...c }], warnings: [] };
+			// contacts = the course's teachers as Merlin lists them (name + id only)
+			return { courses: [{ ...c, categoryid: 5, contacts: [{ id: PROF.id, fullname: PROF.fullname }, { id: ASSISTANT.id, fullname: ASSISTANT.fullname }] }], warnings: [] };
+		case 'core_course_get_categories':
+			return [
+				{ id: 1, name: 'Sveučilište (FAKE)', parent: 0, depth: 1, path: '/1', coursecount: 0 },
+				{ id: 5, name: 'Fakultet za probe (FAKE)', parent: 1, depth: 2, path: '/1/5', coursecount: 1 },
+			];
+		case 'gradereport_overview_get_course_grades':
+			return { grades: [{ courseid: c.id, grade: d.grades.find((g) => g.itemtype === 'course')?.gradeformatted ?? '-', rawgrade: null }], warnings: [] };
+		case 'core_search_get_results': {
+			// One page of hits for any query that appears in a discussion subject; empty page after that.
+			const q = String(p.query ?? '').toLowerCase();
+			const hits = Number(p.page ?? 0) > 0 ? [] : d.discussions.filter((x) => (x.subject + ' ' + x.message).toLowerCase().includes(q));
+			return {
+				totalcount: hits.length,
+				results: hits.map((x) => ({ itemid: x.id, componentname: 'mod_forum', areaname: 'post', title: x.subject, content: x.message, coursefullname: c.fullname, userfullname: x.userfullname, timemodified: x.created, docurl: `${origin}/${year}/mod/forum/discuss.php?d=${x.discussion}` })),
+				warnings: [],
+			};
+		}
 		case 'core_message_get_messages':
 			return { messages: [], warnings: [] };
 		case 'mod_workshop_get_workshops_by_courses':

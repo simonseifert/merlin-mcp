@@ -26,7 +26,7 @@ flowchart LR
 
 ## MCP tools
 
-All tools except `moodle_send_message` are read-only, and all take an optional `year` (see "Multiple years"). Output is compact JSON: HTML stripped, noise fields dropped, a Zagreb-local string (`*_local`) next to every timestamp. Results are capped at 200k characters by dropping whole trailing items, so the output is always valid JSON; a capped result says `truncated: true` and gives `omitted_items`.
+There are 24 tools. All except `moodle_send_message` are read-only, and all take an optional `year` (see "Multiple years"). Output is compact JSON: HTML stripped, noise fields dropped, a Zagreb-local string (`*_local`) next to every timestamp. Results are capped at 200k characters by dropping whole trailing items, so the output is always valid JSON; a capped result says `truncated: true` and gives `omitted_items`.
 
 | Tool | Moodle function(s) | What it's for |
 |---|---|---|
@@ -40,8 +40,8 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_read_file` | (file download, no wsfunction) | the text of one course file: PDF page by page, plain text, Markdown, CSV, JSON or HTML (20 MB cap, at most 200 PDF pages per call, `pages` and `max_chars` to keep it small) |
 | `moodle_get_quiz_details` | mod_quiz_get_quizzes_by_courses, mod_quiz_get_user_attempts | quiz rules without an attempt: open/close, time limit, attempts allowed/used/left, grading method, max grade |
 | `moodle_get_my_groups` | core_group_get_course_user_groups | your groups per course (groupings are teacher-only in Moodle) |
-| `moodle_search` | core_search_get_results | full-text search over your own courses (forum posts, files, pages, sections) |
-| `moodle_get_teachers` | core_course_get_courses_by_field | who teaches each course (course contacts: name and user id, no emails) |
+| `moodle_search` | core_search_get_results | full-text search over your own courses (forum posts, files, pages, books, sections) through Merlin's search index; always scoped to your enrolled courses, and new content takes up to an hour to appear |
+| `moodle_get_teachers` | core_course_get_courses_by_field | who teaches each course (the course contacts Merlin shows on its course list: name and user id, never emails or other students) |
 | `moodle_get_new_forum_posts` | mod_forum_get_forums_by_courses, mod_forum_get_forum_discussions | new discussions since a time across every course, announcement forums by default; marks nothing read |
 | `moodle_get_choices` | mod_choice_get_choices_by_courses, mod_choice_get_choice_options | sign-ups and polls: open/close, options with how full they are, your pick; never answers |
 | `moodle_get_all_updates_since` | core_course_get_updates_since, core_course_check_updates, core_course_get_contents | what changed in every course since a time, with activity names; activities Merlin itself fails on (some quizzes) are skipped and listed |
@@ -108,6 +108,17 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 - `GET /api/pending` (`RELAY_BEARER` only): the last 24 h of send requests with `approve_url` / `reject_url` while pending.
 - `GET /api/approve/<id>?k=<key>`, `GET /api/reject/<id>?k=<key>`: no bearer. An HTML confirm page with one `POST` button; changes nothing. 404 for an unknown id or wrong key.
 - `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 404, 409, 410, 429. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page also sets a strict `Content-Security-Policy` and `X-Frame-Options: DENY`.
+
+## Building on it
+
+The REST side is meant for your own scripts, so you can build things the tools don't cover. Everything goes through `/api/call` with `API_BEARER`, and stays read-only.
+
+- **Watchers and digests.** Poll `/api/notifications` or `core_course_get_updates_since` from cron or n8n and send yourself what changed (ntfy, e-mail, a calendar).
+- **A course and teacher catalogue.** `core_course_get_categories` returns your institution's category tree and `core_course_get_courses_by_field` (with `field=category`) its published courses with their teachers. That is enough to build a local, searchable map of who teaches what across a whole university. Crawl slowly (one call every couple of seconds), cache the result and refresh weekly: the site is shared by over 100 Croatian institutions. `core_course_search_courses` is deliberately not on the allow-list, because it logs a search event.
+- **An archive of your course files.** `moodle_list_files` gives every file with a ready `/api/file?url=…` path; download only what changed.
+- **Fully local.** For scripts on your own laptop, run the Node build (`node dist/node.js`, see "Run it") and point them at `http://127.0.0.1:8787/api/call`. No cloud account is needed, and your token never leaves the machine.
+
+To try any of it without a Merlin account, [examples/](examples/README.md) has a fake Merlin with invented data.
 
 ## Getting your token
 
@@ -182,7 +193,6 @@ where the script prints `{"Authorization": "Bearer <MCP_BEARER>"}`.
 
 - If Merlin's admins disable a function, the tool that uses it returns an error.
 - Moodle errors come back as tool errors or 502s, with the token redacted.
-- `wrangler.toml` declares an empty `MerlinMCP` Durable Object class. It is unused (left over from before 0.4) and will be removed with a `deleted_classes` migration.
 
 ## Licence
 
