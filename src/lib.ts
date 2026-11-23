@@ -351,6 +351,8 @@ export const API_CALL_ALLOWLIST: ReadonlySet<string> = new Set([
 	'mod_forum_get_discussion_posts', // marks the returned posts read (Moodle 5.2), like opening the thread
 	'mod_workshop_get_workshops_by_courses',
 	'gradereport_user_get_grade_items',
+	'gradereport_overview_get_course_grades', // all course totals in one call (0.6.0)
+	'core_search_get_results', // global search; core_search_view_results (the logging one) stays out
 ]);
 
 /**
@@ -376,7 +378,7 @@ export const RESERVED_MOODLE_PARAMS = new Set(['wstoken', 'wsfunction', 'moodlew
  * and it is never browser-like.
  */
 /** Released version (keep in sync with package.json). Sent in the User-Agent and /healthz. */
-export const VERSION = '0.5.1';
+export const VERSION = '0.6.0';
 
 export function moodleUserAgent(contact?: string): string {
 	const c = (contact ?? '').trim();

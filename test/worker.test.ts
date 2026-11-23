@@ -317,7 +317,7 @@ describe('/api/call allow-list', () => {
 		expect(init.method).toBe('POST');
 		expect(new URL(url).searchParams.has('wstoken')).toBe(false);
 		expect(url).not.toContain('the-moodle-token');
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.5.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.6.0 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
 	});
 
 	it('puts the MOODLE_CONTACT address in the User-Agent when it is set', async () => {
@@ -325,7 +325,7 @@ describe('/api/call allow-list', () => {
 		const env = { ...ENV, MOODLE_CONTACT: 'ops@example.org' };
 		await worker.fetch(new Request('https://merlin-mcp.example/api/call?wsfunction=core_enrol_get_users_courses', { headers: AUTH }), env, fakeCtx());
 		const init = fetchMock.mock.calls[0][1] as RequestInit;
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.5.1 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: ops@example.org)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.6.0 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: ops@example.org)');
 	});
 
 	it('never returns userprivateaccesskey through /api/call', async () => {
@@ -471,17 +471,17 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 		expect(body.result.serverInfo.name).toBe('merlin-mcp');
 	});
 
-	it('tools/list has the 22 tools, including the approval-gated send, when a relay is configured', async () => {
+	it('tools/list has the 24 tools, including the approval-gated send, when a relay is configured', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay' }, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(22);
+		expect(names).toHaveLength(24);
 		expect(names).toContain('moodle_send_message');
 	});
 
 	it('without RELAY_BEARER the send tool is left out (nobody could approve it)', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), SPLIT, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(21);
+		expect(names).toHaveLength(23);
 		expect(names).not.toContain('moodle_send_message');
 	});
 
@@ -496,7 +496,7 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 	it('MERLIN_ENABLE_SEND="0" leaves the send tool out', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay', MERLIN_ENABLE_SEND: '0' }, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);
-		expect(names).toHaveLength(21);
+		expect(names).toHaveLength(23);
 		expect(names).not.toContain('moodle_send_message');
 	});
 

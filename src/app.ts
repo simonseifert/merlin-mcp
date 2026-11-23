@@ -1264,14 +1264,31 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 	// 7. Grades
 	readTool(
 		'moodle_get_grades',
-		'Get grade items (scores, percentages, grader feedback) for one course, or for every enrolled course in every active academic year (tagged with `year`). HTML stripped from feedback text.',
+		'Get grade items (score, range and maximum, weight, letter grade, percentage, grader feedback) for one course, or for every enrolled course in every active academic year (tagged with `year`). HTML stripped from feedback text. `summary=true` instead returns only each course total, in one call per year ("where do I stand").',
 		{
 			course_id: z.number().int().optional().describe('Limit to one course; omit for every enrolled course'),
+			summary: z.boolean().default(false).describe('Only the course totals (one cheap call per year) instead of every grade item'),
 			year: listYearParam,
 		},
-		async ({ course_id, year }) => {
+		async ({ course_id, summary, year }) => {
 			// For one course, `year` is the course's year (auto-detected when "all").
 			const years = course_id ? [await courseYear(env(), course_id, year)] : await yearsFor(env(), year);
+			if (summary) {
+				const fan = await fanOut(years, async (y) => {
+					const [userid, courses] = await Promise.all([getUserId(env(), y), getCourses(env(), y)]);
+					const names = new Map(courses.map((c) => [c.id, c.fullname]));
+					const data = await moodleCall<{ grades?: Array<Record<string, unknown>> }>(env(), 'gradereport_overview_get_course_grades', { userid }, y);
+					return (data.grades ?? [])
+						.filter((g) => !course_id || Number(g.courseid) === course_id)
+						.map((g) => ({
+							courseid: Number(g.courseid),
+							coursename: names.get(Number(g.courseid)),
+							grade: typeof g.grade === 'string' ? stripHtml(g.grade) : g.grade,
+							rawgrade: g.rawgrade ?? undefined,
+						}));
+				});
+				return toToolResult(listResult(fan, fan.items));
+			}
 			const fan = await fanOut(years, async (y) => {
 				const userid = await getUserId(env(), y);
 				const courses = await getCourses(env(), y);
@@ -1296,6 +1313,11 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 								graderaw: gi.graderaw,
 								gradeformatted: typeof gi.gradeformatted === 'string' ? stripHtml(gi.gradeformatted) : gi.gradeformatted,
 								percentageformatted: gi.percentageformatted,
+								grademin: gi.grademin,
+								grademax: gi.grademax,
+								rangeformatted: typeof gi.rangeformatted === 'string' ? stripHtml(gi.rangeformatted) : gi.rangeformatted,
+								weightformatted: typeof gi.weightformatted === 'string' && gi.weightformatted ? stripHtml(gi.weightformatted) : undefined,
+								lettergradeformatted: typeof gi.lettergradeformatted === 'string' && gi.lettergradeformatted ? stripHtml(gi.lettergradeformatted) : undefined,
 								feedback: typeof gi.feedback === 'string' ? truncate(stripHtml(gi.feedback), 1000) : undefined,
 								gradedategraded: gi.gradedategraded,
 							})),
@@ -1652,6 +1674,84 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 					course: names.get(Number(g.courseid)),
 					idnumber: g.idnumber || undefined,
 					description: typeof g.description === 'string' && g.description ? truncate(stripHtml(g.description), 300) : undefined,
+				}));
+			});
+			return toToolResult(listResult(fan, fan.items));
+		}
+	);
+
+	// 17b. Search across every course (Merlin's global search index)
+	readTool(
+		'moodle_search',
+		'Full-text search across the user\'s own courses in every active year, using Merlin\'s own search index: forum posts, files and their text, pages, books, sections, activity descriptions. Returns title, course, area, author, time, url and a snippet (HTML stripped). Use it instead of paging through forums, e.g. "kolokvij" or "ispit". The index lags new content by up to an hour. Read-only: it does not log a search view.',
+		{
+			query: z.string().trim().min(2).max(200).describe('Words to search for (Croatian works; Moodle search syntax like "quoted phrase" or -exclude is allowed)'),
+			areas: z
+				.array(z.string().regex(/^[a-z0-9_]+-[a-z0-9_]+$/))
+				.max(10)
+				.optional()
+				.describe('Limit to search areas, e.g. ["mod_forum-post"], ["mod_resource-activity"], ["mod_page-activity"], ["mod_book-chapter"], ["core_course-section"], ["mod_assign-activity"]. Omit for all.'),
+			course_id: z.number().int().optional().describe('Limit to one course (its year is auto-detected)'),
+			limit: z.number().int().min(1).max(50).default(20).describe('Max results per year (Merlin pages 10 at a time)'),
+			year: listYearParam,
+		},
+		async ({ query, areas, course_id, limit, year }) => {
+			const years = course_id ? [await courseYear(env(), course_id, year)] : await yearsFor(env(), year);
+			const fan = await fanOut(years, async (y) => {
+				const params: Record<string, string | number> = { query };
+				(areas ?? []).forEach((a, i) => (params[`filters[areaids][${i}]`] = a));
+				// Always scope to the user's own courses: unfiltered, Merlin's index answers with
+				// course records from the whole shared site (other faculties) and few real hits.
+				const courseIds = course_id ? [course_id] : (await getCourses(env(), y)).map((c) => c.id);
+				if (!courseIds.length) return [];
+				courseIds.forEach((id, i) => (params[`filters[courseids][${i}]`] = id));
+				const out: Array<Record<string, unknown>> = [];
+				// At most 5 pages (50 results) per year: keeps a two-year call under 10 Worker subrequests.
+				for (let page = 0; out.length < limit && page < 5; page++) {
+					const data = await moodleCall<{ totalcount?: number; results?: Array<Record<string, unknown>> }>(env(), 'core_search_get_results', { ...params, page }, y);
+					const results = data.results ?? [];
+					for (const r of results) {
+						if (out.length >= limit) break;
+						const snippet = stripHtml(r.content ?? r.description1 ?? '');
+						out.push({
+							title: stripHtml(r.title),
+							area: r.areaname,
+							course: r.coursefullname,
+							author: r.userfullname || undefined,
+							timemodified: r.timemodified,
+							url: r.docurl,
+							files: Array.isArray(r.filenames) && r.filenames.length ? r.filenames : r.filename || undefined,
+							snippet: snippet ? truncate(snippet, 400) : undefined,
+						});
+					}
+					// Merlin filters each page of 10 by access after ranking, so a page can come back short
+					// (7, then 7 more) and totalcount is only an estimate: page until an empty page.
+					if (results.length === 0) break;
+				}
+				return out;
+			});
+			return toToolResult(listResult(fan, fan.items));
+		}
+	);
+
+	// 17c. Who teaches a course (the site's "course contacts", normally the teachers)
+	readTool(
+		'moodle_get_teachers',
+		"Who teaches each course: the course contacts Merlin shows on the course listing (normally the teachers), with their Merlin user id for moodle_send_message. One call per year; returns names, ids and course only, never other students or anyone's email.",
+		{
+			course_id: z.number().int().optional().describe('Limit to one course; omit for every enrolled course'),
+			year: listYearParam,
+		},
+		async ({ course_id, year }) => {
+			const years = course_id ? [await courseYear(env(), course_id, year)] : await yearsFor(env(), year);
+			const fan = await fanOut(years, async (y) => {
+				const ids = course_id ? [course_id] : (await getCourses(env(), y)).map((c) => c.id).slice(0, 60);
+				if (!ids.length) return [];
+				const data = await moodleCall<{ courses?: Array<Record<string, unknown>> }>(env(), 'core_course_get_courses_by_field', { field: 'ids', value: ids.join(',') }, y);
+				return (data.courses ?? []).map((c) => ({
+					courseid: Number(c.id),
+					course: c.fullname,
+					teachers: ((c.contacts as Array<Record<string, unknown>> | undefined) ?? []).map((t) => ({ userid: Number(t.id), name: t.fullname })),
 				}));
 			});
 			return toToolResult(listResult(fan, fan.items));

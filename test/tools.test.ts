@@ -111,8 +111,33 @@ function fixture(year: string, fn: string, p: URLSearchParams): unknown {
 			};
 		case 'core_message_get_conversation_messages':
 			return { members: [{ id: 777, fullname: 'Test Recipient' }], messages: [{ id: 6, useridfrom: 42, text: '<p>Hello</p>', timecreated: 3100 }] };
+		case 'gradereport_overview_get_course_grades':
+			return { grades: is26 ? [{ courseid: 10, grade: '<b>36,50</b>', rawgrade: '36.5' }, { courseid: 20, grade: '-', rawgrade: null }] : [{ courseid: 10, grade: '61,00', rawgrade: '61' }], warnings: [] };
+		case 'core_search_get_results': {
+			const page = Number(p.get('page') ?? 0);
+			const total = is26 ? 12 : 1;
+			const n = Math.max(0, Math.min(10, total - page * 10));
+			return {
+				totalcount: total,
+				results: Array.from({ length: n }, (_, i) => ({
+					title: `Kolokvij <span class="highlight">${page * 10 + i}</span>`,
+					componentname: 'mod_forum',
+					areaname: 'Forum - posts',
+					coursefullname: 'Test Course 101',
+					userfullname: 'Test Teacher',
+					timemodified: 3000 + i,
+					docurl: 'https://moodle.srce.hr/x/mod/forum/discuss.php?d=1',
+					content: '<p>Prvi <b>kolokvij</b> je u petak</p>',
+				})),
+				warnings: [],
+			};
+		}
+		case 'core_course_get_courses_by_field':
+			return {
+				courses: String(p.get('value')).split(',').map((id) => ({ id: Number(id), fullname: `Course ${id}`, contacts: [{ id: 900 + Number(id), fullname: 'Test Teacher', email: 'leak@example.org' }] })),
+			};
 		case 'gradereport_user_get_grade_items':
-			return { usergrades: [{ gradeitems: [{ itemtype: 'course', itemname: '', graderaw: 90, gradeformatted: '<b>90</b>', percentageformatted: '90 %', feedback: '<p>Well <b>done</b></p>' }] }] };
+			return { usergrades: [{ gradeitems: [{ itemtype: 'course', itemname: '', graderaw: 90, grademin: 0, grademax: 100, rangeformatted: '0&ndash;100', weightformatted: '', gradeformatted: '<b>90</b>', percentageformatted: '90 %', feedback: '<p>Well <b>done</b></p>' }] }] };
 		case 'core_calendar_get_action_events_by_timesort':
 			return { events: [{ id: 1, name: is26 ? 'Essay due' : 'Old due', course: { id: 10, fullname: 'Test Course 101' }, modulename: 'assign', timesort: is26 ? 9000 : 8000, url: 'https://x', overdue: false, description: '<p>Hand in <b>PDF</b></p>' }] };
 		case 'mod_assign_get_assignments':
@@ -499,19 +524,21 @@ describe('guard: the MCP surface stays read-only', () => {
 		'moodle_get_quiz_attempts',
 		'moodle_get_quiz_details',
 		'moodle_get_recent_forum_posts',
+		'moodle_get_teachers',
 		'moodle_get_upcoming_deadlines',
 		'moodle_get_updates_since',
 		'moodle_list_files',
 		'moodle_read_file',
+		'moodle_search',
 		'moodle_send_message',
 		'moodle_whoami',
 	];
 
-	it('tools/list returns exactly the 22 known tools (adding one forces updating this list and its tests)', async () => {
+	it('tools/list returns exactly the 24 known tools (adding one forces updating this list and its tests)', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), ENV, ctx)).json()) as any;
 		const names: string[] = body.result.tools.map((t: { name: string }) => t.name).sort();
 		expect(names).toEqual([...KNOWN_TOOLS].sort());
-		expect(names).toHaveLength(22);
+		expect(names).toHaveLength(24);
 	});
 
 	it('every tool, called with realistic arguments, only sends read-only wsfunctions', async () => {
@@ -538,6 +565,9 @@ describe('guard: the MCP surface stays read-only', () => {
 			['moodle_get_new_forum_posts', { forums: 'all', since: 1 }],
 			['moodle_get_choices', { include_closed: true }],
 			['moodle_get_all_updates_since', { since: 1 }],
+			['moodle_search', { query: 'kolokvij', areas: ['mod_forum-post'] }],
+			['moodle_get_teachers', {}],
+			['moodle_get_grades', { summary: true }],
 		];
 		const env = {
 			...ENV,
@@ -1037,5 +1067,95 @@ describe('review fixes (16 Nov 2026)', () => {
 	it('since overrides hours_ago', async () => {
 		const { data } = await callTool('moodle_get_new_forum_posts', { year: Y26, since: 1234, hours_ago: 1 });
 		expect(data.since).toBe(1234);
+	});
+});
+
+describe('moodle_search (0.6.0)', () => {
+	it('searches both years, pages until the limit, strips HTML, never logs a view', async () => {
+		const { data } = await callTool('moodle_search', { query: 'kolokvij', limit: 15 });
+		const y26 = data.items.filter((i: any) => i.year === Y26);
+		const y25 = data.items.filter((i: any) => i.year === Y25);
+		expect(y26).toHaveLength(12); // 12 hits over two pages, under the limit of 15
+		expect(y25).toHaveLength(1);
+		expect(y26[0]).toMatchObject({ title: 'Kolokvij 0', area: 'Forum - posts', course: 'Test Course 101', author: 'Test Teacher', snippet: 'Prvi kolokvij je u petak' });
+		expect(calls.filter((c) => c.fn === 'core_search_get_results' && c.year === Y26).map((c) => c.params.get('page'))).toEqual(['0', '1', '2']);
+		expect(fnsCalled()).not.toContain('core_search_view_results');
+		// scoped to the enrolled courses of each year, never the whole shared site
+		const first26 = calls.find((c) => c.fn === 'core_search_get_results' && c.year === Y26)!;
+		expect([first26.params.get('filters[courseids][0]'), first26.params.get('filters[courseids][1]')]).toEqual(['10', '20']);
+	});
+
+	it('stops at the limit and passes area and course filters', async () => {
+		const { data } = await callTool('moodle_search', { query: 'ispit', areas: ['mod_forum-post', 'mod_resource-activity'], course_id: 20, limit: 5 });
+		expect(data.items).toHaveLength(5);
+		const c = calls.find((x) => x.fn === 'core_search_get_results')!;
+		expect(c.year).toBe(Y26);
+		expect(c.params.get('filters[areaids][0]')).toBe('mod_forum-post');
+		expect(c.params.get('filters[areaids][1]')).toBe('mod_resource-activity');
+		expect(c.params.get('filters[courseids][0]')).toBe('20');
+		expect(c.params.get('filters[courseids][1]')).toBeNull();
+		expect(calls.filter((x) => x.fn === 'core_search_get_results')).toHaveLength(1); // limit reached on page 0
+	});
+
+	it('one year failing is reported in errors, the other still answers', async () => {
+		overrides.core_search_get_results = (y, p) =>
+			y === Y25 ? { exception: 'moodle_exception', errorcode: 'disabled', message: 'Search disabled' } : fixture(y, 'core_search_get_results', p);
+		const { isError, data } = await callTool('moodle_search', { query: 'kolokvij' });
+		expect(isError).toBe(false);
+		expect(data.items.every((i: any) => i.year === Y26)).toBe(true);
+		expect(Object.keys(data.errors)).toEqual([Y25]);
+	});
+});
+
+describe('moodle_get_grades range and summary (0.6.0)', () => {
+	it('grade items carry min, max and range', async () => {
+		const { data } = await callTool('moodle_get_grades', { course_id: 20 });
+		expect(data.items[0].gradeitems[0]).toMatchObject({ grademin: 0, grademax: 100, rangeformatted: '0–100' });
+		expect(data.items[0].gradeitems[0].weightformatted).toBeUndefined();
+	});
+
+	it('summary=true makes one overview call per year and names the courses', async () => {
+		const { data } = await callTool('moodle_get_grades', { summary: true });
+		expect(fnsCalled()).not.toContain('gradereport_user_get_grade_items');
+		expect(yearsCalled('gradereport_overview_get_course_grades')).toEqual([Y25, Y26]);
+		expect(data.items).toContainEqual(expect.objectContaining({ year: Y26, courseid: 10, coursename: 'Test Course 101', grade: '36,50', rawgrade: '36.5' }));
+		expect(data.items).toHaveLength(3);
+	});
+
+	it('summary with course_id keeps only that course', async () => {
+		const { data } = await callTool('moodle_get_grades', { summary: true, course_id: 20 });
+		expect(data.items).toEqual([expect.objectContaining({ year: Y26, courseid: 20 })]);
+	});
+
+	it('summary: one year failing lands in errors', async () => {
+		overrides.gradereport_overview_get_course_grades = (y, p) =>
+			y === Y25 ? { exception: 'moodle_exception', message: 'nope' } : fixture(y, 'gradereport_overview_get_course_grades', p);
+		const { data } = await callTool('moodle_get_grades', { summary: true });
+		expect(Object.keys(data.errors)).toEqual([Y25]);
+		expect(data.items).toHaveLength(2);
+	});
+});
+
+describe('moodle_get_teachers (0.6.0)', () => {
+	it('one courses_by_field call per year, returns names and ids only (no email)', async () => {
+		const { data, text } = await callTool('moodle_get_teachers');
+		expect(calls.filter((c) => c.fn === 'core_course_get_courses_by_field').map((c) => `${c.year}:${c.params.get('field')}:${c.params.get('value')}`).sort()).toEqual([`${Y25}:ids:10`, `${Y26}:ids:10,20`]);
+		expect(data.items).toContainEqual({ year: Y26, courseid: 20, course: 'Course 20', teachers: [{ userid: 920, name: 'Test Teacher' }] });
+		expect(text).not.toContain('leak@example.org');
+		expect(fnsCalled()).not.toContain('core_enrol_get_enrolled_users');
+	});
+
+	it('course_id asks for that course only', async () => {
+		const { data } = await callTool('moodle_get_teachers', { course_id: 20 });
+		expect(data.items).toHaveLength(1);
+		expect(calls.find((c) => c.fn === 'core_course_get_courses_by_field')!.params.get('value')).toBe('20');
+	});
+
+	it('one year failing lands in errors', async () => {
+		overrides.core_course_get_courses_by_field = (y, p) =>
+			y === Y25 ? { exception: 'moodle_exception', message: 'nope' } : fixture(y, 'core_course_get_courses_by_field', p);
+		const { data } = await callTool('moodle_get_teachers');
+		expect(Object.keys(data.errors)).toEqual([Y25]);
+		expect(data.items.every((i: any) => i.year === Y26)).toBe(true);
 	});
 });

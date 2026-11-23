@@ -40,13 +40,15 @@ All tools except `moodle_send_message` are read-only, and all take an optional `
 | `moodle_read_file` | (file download, no wsfunction) | the text of one course file: PDF page by page, plain text, Markdown, CSV, JSON or HTML (20 MB cap, at most 200 PDF pages per call, `pages` and `max_chars` to keep it small) |
 | `moodle_get_quiz_details` | mod_quiz_get_quizzes_by_courses, mod_quiz_get_user_attempts | quiz rules without an attempt: open/close, time limit, attempts allowed/used/left, grading method, max grade |
 | `moodle_get_my_groups` | core_group_get_course_user_groups | your groups per course (groupings are teacher-only in Moodle) |
+| `moodle_search` | core_search_get_results | full-text search over your own courses (forum posts, files, pages, sections) |
+| `moodle_get_teachers` | core_course_get_courses_by_field | who teaches each course (course contacts: name and user id, no emails) |
 | `moodle_get_new_forum_posts` | mod_forum_get_forums_by_courses, mod_forum_get_forum_discussions | new discussions since a time across every course, announcement forums by default; marks nothing read |
 | `moodle_get_choices` | mod_choice_get_choices_by_courses, mod_choice_get_choice_options | sign-ups and polls: open/close, options with how full they are, your pick; never answers |
 | `moodle_get_all_updates_since` | core_course_get_updates_since, core_course_check_updates, core_course_get_contents | what changed in every course since a time, with activity names; activities Merlin itself fails on (some quizzes) are skipped and listed |
 | `moodle_get_updates_since` | core_course_get_updates_since, core_course_check_updates | cheap "what changed in the last N hours"; skips activities Merlin fails on |
 | `moodle_get_recent_forum_posts` | mod_forum_get_forum_discussions | latest discussions in a forum |
 | `moodle_get_forum_discussion` | mod_forum_get_discussion_posts | full text of one thread (marks it read, like a browser) |
-| `moodle_get_grades` | gradereport_user_get_grade_items | grades and feedback, for one course or all |
+| `moodle_get_grades` | gradereport_user_get_grade_items, gradereport_overview_get_course_grades | grades with range, weight and feedback, for one course or all; `summary=true` gives course totals in one call |
 | `moodle_get_assignments` | mod_assign_get_assignments (+ mod_assign_get_submission_status with `include_feedback`) | due dates; with `include_feedback=true` also submission status and grader comments, which logs a teacher-visible "feedback viewed" event |
 | `moodle_get_quiz_attempts` | mod_quiz_get_user_attempts | your attempts at a quiz |
 | `moodle_get_quiz_attempt_review` | mod_quiz_get_attempt_review | per-question marks and feedback of a finished attempt |
@@ -91,7 +93,7 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 
 ## Multiple years
 
-- **List tools** (`moodle_get_notifications`, `moodle_get_calendar_events`, `moodle_get_upcoming_deadlines`, `moodle_get_courses`, `moodle_get_messages`, `moodle_get_grades`, `moodle_get_assignments`, `moodle_whoami`) default to `year="all"`: every active year in parallel, returning `{years, items, errors?}` with `year` on every item. One failing year goes under `errors` and the others still come back.
+- **List tools** (`moodle_get_notifications`, `moodle_get_calendar_events`, `moodle_get_upcoming_deadlines`, `moodle_get_courses`, `moodle_get_messages`, `moodle_get_grades`, `moodle_get_assignments`, `moodle_search`, `moodle_get_teachers`, `moodle_whoami`) default to `year="all"`: every active year in parallel, returning `{years, items, errors?}` with `year` on every item. One failing year goes under `errors` and the others still come back.
 - **Id tools** (`moodle_get_course_contents`, `moodle_list_files`, `moodle_get_updates_since`, `moodle_get_recent_forum_posts`, `moodle_get_quiz_attempts`, `moodle_get_quiz_attempt_review`, `moodle_get_forum_discussion`) take the id's `year`, or find it themselves. An id that exists in more than one year returns an error asking for `year`.
 - **Copies from the yearly clone.** Each new year's site starts as a copy of the last, so older notifications and messages exist in both. Copies are collapsed on (id + time + subject) or (id + members), never on id alone, and the kept copy lists the other years in `also_in`.
 - **Tokens.** One token usually works on both sites because the clone copies it. If they ever differ, set `MOODLE_TOKENS` to a JSON map `{"2025-2026": "...", "2026-2027": "..."}`; a missing year falls back to `MOODLE_TOKEN`.
@@ -100,7 +102,7 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 
 `/api/*` takes `Authorization: Bearer <API_BEARER>`. `/mcp` takes `MCP_BEARER`. Neither opens the other (unless you set `LEGACY_API_BEARER="1"` for an old single-bearer setup). The approval routes have their own credentials.
 
-- `GET /api/call?wsfunction=<fn>[&year=]&<params>`: a read-only passthrough for an exact, reviewed list of 19 functions (`API_CALL_ALLOWLIST` in `src/lib.ts`). Anything else is a 400 and never reaches Moodle. Callers can't override the token or format, `core_message_get_messages` always has `markasread=0`, and credential fields (including keys embedded in `tokenpluginfile.php` URLs) are stripped from responses.
+- `GET /api/call?wsfunction=<fn>[&year=]&<params>`: a read-only passthrough for an exact, reviewed list of 21 functions (`API_CALL_ALLOWLIST` in `src/lib.ts`). Anything else is a 400 and never reaches Moodle. Callers can't override the token or format, `core_message_get_messages` always has `markasread=0`, and credential fields (including keys embedded in `tokenpluginfile.php` URLs) are stripped from responses.
 - `GET /api/notifications?unread_only=true&limit=20[&year=]`: a JSON array of raw notification objects. `year=all` merges every active year.
 - `GET /api/file?url=<https://moodle.srce.hr/...>`: a file proxy. The token is added server-side; redirects are refused, not followed.
 - `GET /api/pending` (`RELAY_BEARER` only): the last 24 h of send requests with `approve_url` / `reject_url` while pending.

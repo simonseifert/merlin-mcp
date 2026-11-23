@@ -17,7 +17,10 @@ Each academic year is a separate Moodle, and ids are only unique within one year
 | What is due soon? | `moodle_get_upcoming_deadlines` (quiz items include time limit and attempts left) |
 | What is on my calendar (classes, exams)? | `moodle_get_calendar_events` |
 | Assignment status, due dates, grader comments | `moodle_get_assignments` |
-| Grades and feedback | `moodle_get_grades` (`course_id` optional) |
+| Grades and feedback | `moodle_get_grades` (`course_id` optional; items carry `grademax` and `rangeformatted`) |
+| Where do I stand overall | `moodle_get_grades` with `summary=true` (course totals, one call per year) |
+| Find a word anywhere ("kolokvij", "ispit") | `moodle_search` (`areas` e.g. `["mod_forum-post"]`, `course_id` optional); index lags up to an hour |
+| Who teaches a course, whom to message | `moodle_get_teachers` (`course_id` optional; user id for `moodle_send_message`) |
 | What is new (bell icon)? | `moodle_get_notifications` (`unread_only=true` for fresh) |
 | What changed anywhere lately? | `moodle_get_all_updates_since` (every course, with activity names; `skipped_activities` lists the few quizzes Merlin itself fails on, everything else is checked) |
 | What changed in one course? | `moodle_get_updates_since`, then `moodle_get_course_contents` if needed |
