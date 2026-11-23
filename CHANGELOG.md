@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.6.2 (2026-11-23)
+
+- README: new "Building on it" section (watchers, a course and teacher catalogue, a file archive, fully local use), 24 tools listed, notes on search scope and the teacher list. Removed the stale Durable Object note.
+- `examples/fake-moodle.mjs` now serves the 0.6 functions (`core_search_get_results`, `gradereport_overview_get_course_grades`, `core_course_get_categories`, course contacts), so `moodle_search`, `moodle_get_teachers` and `moodle_get_grades` with `summary=true` work in the demo.
+
 ## 0.6.1 (2026-11-23)
 
 - `/api/call` allow-list: `core_course_get_categories` (22 functions), for a catalogue map of courses and teachers built with `core_course_get_courses_by_field`. `core_course_search_courses` is deliberately left out: it logs a `courses_searched` event.
