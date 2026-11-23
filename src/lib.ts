@@ -353,6 +353,7 @@ export const API_CALL_ALLOWLIST: ReadonlySet<string> = new Set([
 	'gradereport_user_get_grade_items',
 	'gradereport_overview_get_course_grades', // all course totals in one call (0.6.0)
 	'core_search_get_results', // global search; core_search_view_results (the logging one) stays out
+	'core_course_get_categories', // catalogue map; core_course_search_courses stays out (it logs a courses_searched event)
 ]);
 
 /**
@@ -378,7 +379,7 @@ export const RESERVED_MOODLE_PARAMS = new Set(['wstoken', 'wsfunction', 'moodlew
  * and it is never browser-like.
  */
 /** Released version (keep in sync with package.json). Sent in the User-Agent and /healthz. */
-export const VERSION = '0.6.0';
+export const VERSION = '0.6.1';
 
 export function moodleUserAgent(contact?: string): string {
 	const c = (contact ?? '').trim();

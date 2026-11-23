@@ -102,7 +102,7 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 
 `/api/*` takes `Authorization: Bearer <API_BEARER>`. `/mcp` takes `MCP_BEARER`. Neither opens the other (unless you set `LEGACY_API_BEARER="1"` for an old single-bearer setup). The approval routes have their own credentials.
 
-- `GET /api/call?wsfunction=<fn>[&year=]&<params>`: a read-only passthrough for an exact, reviewed list of 21 functions (`API_CALL_ALLOWLIST` in `src/lib.ts`). Anything else is a 400 and never reaches Moodle. Callers can't override the token or format, `core_message_get_messages` always has `markasread=0`, and credential fields (including keys embedded in `tokenpluginfile.php` URLs) are stripped from responses.
+- `GET /api/call?wsfunction=<fn>[&year=]&<params>`: a read-only passthrough for an exact, reviewed list of 22 functions (`API_CALL_ALLOWLIST` in `src/lib.ts`). Anything else is a 400 and never reaches Moodle. Callers can't override the token or format, `core_message_get_messages` always has `markasread=0`, and credential fields (including keys embedded in `tokenpluginfile.php` URLs) are stripped from responses.
 - `GET /api/notifications?unread_only=true&limit=20[&year=]`: a JSON array of raw notification objects. `year=all` merges every active year.
 - `GET /api/file?url=<https://moodle.srce.hr/...>`: a file proxy. The token is added server-side; redirects are refused, not followed.
 - `GET /api/pending` (`RELAY_BEARER` only): the last 24 h of send requests with `approve_url` / `reject_url` while pending.

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.6.1 (2026-11-23)
+
+- `/api/call` allow-list: `core_course_get_categories` (22 functions), for a catalogue map of courses and teachers built with `core_course_get_courses_by_field`. `core_course_search_courses` is deliberately left out: it logs a `courses_searched` event.
+
 ## 0.6.0 (2026-11-23)
 
 - `moodle_search`: full-text search across your own courses in every active year (always filtered to your enrolled courses: unfiltered, the shared site answers with other faculties' course records), through Merlin's own search index (`core_search_get_results`): forum posts, files, pages, books, sections. Optional `areas`, `course_id` and `limit` (up to 50 per year, 10 per request, so at most 5 requests per year). It never calls `core_search_view_results`, the variant that logs a search view.
