@@ -8,3 +8,5 @@ graphify-out
 *.sqlite
 *.env
 .git
+dashboard/node_modules
+dashboard/dist

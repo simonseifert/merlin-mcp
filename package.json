@@ -5,12 +5,15 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "build:dashboard": "npm --prefix dashboard ci && npm --prefix dashboard run build",
+    "deploy": "npm run build:dashboard && wrangler deploy",
     "tail": "wrangler tail",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
     "build:node": "tsc -p tsconfig.node.json",
-    "start": "node dist/node.js"
+    "start": "node dist/node.js",
+    "dashboard": "npm run build:dashboard && npm run build:node && node --env-file=merlin.env dist/node.js",
+    "dashboard:multi": "npm run build:dashboard && npm run build:node && DASHBOARD_MULTIUSER=1 node --env-file=merlin.env dist/node.js"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.8",

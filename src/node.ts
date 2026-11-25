@@ -16,6 +16,9 @@
  */
 
 import { createServer as createHttpServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { extname, normalize, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { DatabaseSync } from 'node:sqlite';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
@@ -77,6 +80,8 @@ export function envFromProcess(vars: NodeJS.ProcessEnv, approvals: Approvals): E
 		MOODLE_TOKEN: pick('MOODLE_TOKEN') ?? '',
 		MOODLE_TOKENS: pick('MOODLE_TOKENS'),
 		MCP_BEARER: pick('MCP_BEARER') ?? '',
+		DASHBOARD_KEY: pick('DASHBOARD_KEY'),
+		DASHBOARD_MULTIUSER: pick('DASHBOARD_MULTIUSER'),
 		API_BEARER: pick('API_BEARER'),
 		LEGACY_API_BEARER: pick('LEGACY_API_BEARER') ?? '0',
 		RELAY_BEARER: pick('RELAY_BEARER'),
@@ -126,6 +131,52 @@ async function send(res: ServerResponse, response: Response): Promise<void> {
 	body.pipe(res);
 }
 
+/** Built web dashboard (dashboard/dist, `npm run build:dashboard`); on Workers the same folder is served as static assets. */
+const DASHBOARD_DIR = fileURLToPath(new URL('../dashboard/dist/', import.meta.url));
+const MIME: Record<string, string> = {
+	'.html': 'text/html; charset=utf-8',
+	'.js': 'text/javascript; charset=utf-8',
+	'.css': 'text/css; charset=utf-8',
+	'.svg': 'image/svg+xml',
+	'.png': 'image/png',
+	'.webp': 'image/webp',
+	'.woff2': 'font/woff2',
+	'.json': 'application/json; charset=utf-8',
+};
+
+/** Static files under /dashboard/, or undefined to fall through to the API. Paths can't leave DASHBOARD_DIR. */
+export async function dashboardFile(pathname: string, dir = DASHBOARD_DIR): Promise<Response | undefined> {
+	if (pathname === '/dashboard') return new Response(null, { status: 308, headers: { Location: '/dashboard/' } });
+	if (!pathname.startsWith('/dashboard/')) return undefined;
+	let rel: string;
+	try {
+		rel = decodeURIComponent(pathname.slice(1));
+	} catch {
+		return new Response('Bad path', { status: 400 });
+	}
+	if (rel.endsWith('/')) rel += 'index.html';
+	const full = normalize(dir + rel);
+	if (!full.startsWith(normalize(dir)) || full.includes(`${sep}..${sep}`)) return new Response('Not found', { status: 404 });
+	try {
+		const body = await readFile(full);
+		const type = MIME[extname(full)] ?? 'application/octet-stream';
+		const headers: Record<string, string> = { 'Content-Type': type, 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'no-referrer' };
+		headers['Cache-Control'] = rel.includes('/assets/') ? 'public, max-age=31536000, immutable' : 'no-cache';
+		if (type.startsWith('text/html')) {
+			headers['Content-Security-Policy'] = "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'";
+			headers['X-Frame-Options'] = 'DENY';
+		}
+		return new Response(body, { headers });
+	} catch {
+		return new Response('Dashboard not built: run npm run build:dashboard', { status: 404, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
+	}
+}
+
+export function dashboardOpen(host: string, publicUrl?: string, setting?: string): boolean {
+	if (setting === '0' || publicUrl) return false;
+	return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
 export function startHttp(env: Env, port: number, publicUrl?: string, host = '127.0.0.1') {
 	const server = createHttpServer(async (req, res) => {
 		try {
@@ -133,7 +184,9 @@ export function startHttp(env: Env, port: number, publicUrl?: string, host = '12
 			// so a caller could otherwise point the owner's Send button at their own server.
 			const listening = server.address();
 			const base = publicUrl ?? `http://localhost:${typeof listening === 'object' && listening ? listening.port : port}`;
-			await send(res, await handle(toRequest(req, base), env));
+			const request = toRequest(req, base);
+			const file = req.method === 'GET' || req.method === 'HEAD' ? await dashboardFile(new URL(request.url).pathname) : undefined;
+			await send(res, file ?? (await handle(request, env)));
 		} catch (err) {
 			res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' }).end('Internal error');
 			console.error('merlin-mcp:', err instanceof Error ? err.message : 'request failed');
@@ -158,6 +211,9 @@ async function main() {
 	const port = Number(process.env.PORT ?? 8787);
 	// Only this machine by default. Set HOST=0.0.0.0 (the Docker image does) to accept other machines.
 	const host = process.env.HOST ?? '127.0.0.1';
+	// Only this machine can reach a loopback server, so the dashboard needs no key there. Not behind a
+	// reverse proxy (MERLIN_PUBLIC_URL), which would forward the internet to loopback. DASHBOARD_OPEN=0 turns it off.
+	env.DASHBOARD_OPEN = env.DASHBOARD_MULTIUSER !== '1' && dashboardOpen(host, process.env.MERLIN_PUBLIC_URL, process.env.DASHBOARD_OPEN) ? '1' : '0';
 	const server = startHttp(env, port, process.env.MERLIN_PUBLIC_URL, host);
 	console.error(`merlin-mcp listening on ${host}:${port} (POST /mcp)`);
 	const stop = () => server.close(() => process.exit(0));

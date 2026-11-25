@@ -10,11 +10,20 @@ COPY tsconfig.node.json ./
 COPY src ./src
 RUN npx tsc -p tsconfig.node.json && npm prune --omit=dev --ignore-scripts
 
+# The web dashboard (/dashboard/): static files, built once here.
+FROM node:22-slim AS dashboard
+WORKDIR /app/dashboard
+COPY dashboard/package.json dashboard/package-lock.json ./
+RUN npm ci
+COPY dashboard ./
+RUN npm run build
+
 FROM node:22-slim
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8787 MERLIN_DB=/data/merlin.sqlite NODE_NO_WARNINGS=1
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
+COPY --from=dashboard /app/dashboard/dist ./dashboard/dist
 COPY package.json ./
 RUN mkdir -p /data && chown node:node /data
 USER node

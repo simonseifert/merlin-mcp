@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Web dashboard at `/dashboard/` (folder `dashboard/`): points per course with item detail, a month calendar, exams, seminars and announcements, in a frosted-glass UI over a three.js scene. Served as Workers static assets, or by the Node server from `dashboard/dist`; the Docker image builds it.
+- `GET /api/dashboard`: one read-only answer for the page, built from the existing tools and cached for 5 minutes. Opened by a new optional secret, `DASHBOARD_KEY`, which opens nothing else (`API_BEARER` also works).
 ## 0.6.2 (2026-11-23)
 
 - README: new "Building on it" section (watchers, a course and teacher catalogue, a file archive, fully local use), 24 tools listed, notes on search scope and the teacher list. Removed the stale Durable Object note.

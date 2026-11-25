@@ -59,6 +59,7 @@ import {
 } from './lib.js';
 import { extractFileText, READ_FILE_MAX_BYTES } from './filetext.js';
 import { notifierConfigured, notifyOutcome, notifyPending, type NotifyEnv } from './notify.js';
+import { handleDashboard, handleMerlinLogin, isMerlinToken } from './dashboard.js';
 import { DAILY_SEND_CAP, PENDING_TTL_MS, type ApprovalsApi, type PendingSend } from './approvals.js';
 
 export interface Env extends NotifyEnv {
@@ -68,6 +69,9 @@ export interface Env extends NotifyEnv {
 	MOODLE_TOKEN: string; // Moodle web service token (secret)
 	MOODLE_TOKENS?: string; // optional JSON map year -> token (secret); falls back to MOODLE_TOKEN
 	MCP_BEARER: string; // Your own shared secret to gate the MCP endpoint (secret)
+	DASHBOARD_KEY?: string; // secret that opens GET /api/dashboard only (the web dashboard keeps it in the browser)
+	DASHBOARD_OPEN?: string; // "1": /api/dashboard needs no key. Set by src/node.ts only for a loopback-only server; never on Workers
+	DASHBOARD_MULTIUSER?: string; // "1": each visitor signs in with their own Merlin token (sent per request, never stored)
 	API_BEARER?: string; // secret for /api/* (automation); see README "Rotating the bearers"
 	LEGACY_API_BEARER?: string; // var: "1" lets MCP_BEARER open /api/* too (old single-bearer setups); anything else, or unset, keeps them separate
 	RELAY_BEARER?: string; // secret for GET /api/pending (the approval relay only); without it (and without a NOTIFY_* channel) moodle_send_message is not offered
@@ -2126,6 +2130,26 @@ export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: P
 			return new Response('Unauthorized', { status: 401 });
 		}
 		return handlePending(env, url.origin);
+	}
+
+	// The web dashboard (dashboard/). Multi-user: each visitor sends their own Merlin token (X-Merlin-Token),
+	// used for that request only and never stored. Single-user: the shared token, gated by DASHBOARD_KEY
+	// (or opened on a loopback-only Node server).
+	if (url.pathname === '/api/dashboard' || url.pathname === '/api/merlin-login') {
+		if (env.DASHBOARD_MULTIUSER === '1') {
+			const userToken = (request.headers.get('X-Merlin-Token') ?? '').trim();
+			if (!isMerlinToken(userToken)) return jsonResponse({ error: 'Prijava je obavezna: pošalji svoj Merlin token.', login: true }, { status: 401 });
+			return url.pathname === '/api/merlin-login'
+				? handleMerlinLogin(request, env, registerTools as never, userToken)
+				: handleDashboard(request, env, registerTools as never, { userToken });
+		}
+		const header = request.headers.get('Authorization') ?? '';
+		const open = env.DASHBOARD_OPEN === '1';
+		if (!open && !(await bearerIs(header, env.DASHBOARD_KEY)) && !(await authorized(env, url.pathname, header))) {
+			return new Response('Unauthorized', { status: 401 });
+		}
+		if (url.pathname === '/api/merlin-login') return jsonResponse({ error: 'Login nije uključen (DASHBOARD_MULTIUSER).' }, { status: 404 });
+		return handleDashboard(request, env, registerTools as never);
 	}
 
 	// Bearer check on every other route this worker serves.
