@@ -69,3 +69,19 @@ export interface Dashboard {
 	announcements: DashAnnouncement[];
 	errors?: Array<{ part: string; error: string }>;
 }
+
+/** GET /api/dashboard?part=grades: points per course, merged into Dashboard.courses by key. */
+export interface DashGrades {
+	generated_at: number;
+	year: string;
+	courses: Array<Pick<DashCourse, 'key' | 'total' | 'items' | 'error'>>;
+	errors?: Array<{ part: string; error: string }>;
+}
+
+/** GET /api/dashboard?part=announcements. */
+export interface DashAnnouncements {
+	generated_at: number;
+	year: string;
+	announcements: DashAnnouncement[];
+	errors?: Array<{ part: string; error: string }>;
+}

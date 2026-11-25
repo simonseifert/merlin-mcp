@@ -81,7 +81,6 @@ export function envFromProcess(vars: NodeJS.ProcessEnv, approvals: Approvals): E
 		MOODLE_TOKENS: pick('MOODLE_TOKENS'),
 		MCP_BEARER: pick('MCP_BEARER') ?? '',
 		DASHBOARD_KEY: pick('DASHBOARD_KEY'),
-		DASHBOARD_MULTIUSER: pick('DASHBOARD_MULTIUSER'),
 		API_BEARER: pick('API_BEARER'),
 		LEGACY_API_BEARER: pick('LEGACY_API_BEARER') ?? '0',
 		RELAY_BEARER: pick('RELAY_BEARER'),
@@ -213,7 +212,7 @@ async function main() {
 	const host = process.env.HOST ?? '127.0.0.1';
 	// Only this machine can reach a loopback server, so the dashboard needs no key there. Not behind a
 	// reverse proxy (MERLIN_PUBLIC_URL), which would forward the internet to loopback. DASHBOARD_OPEN=0 turns it off.
-	env.DASHBOARD_OPEN = env.DASHBOARD_MULTIUSER !== '1' && dashboardOpen(host, process.env.MERLIN_PUBLIC_URL, process.env.DASHBOARD_OPEN) ? '1' : '0';
+	env.DASHBOARD_OPEN = dashboardOpen(host, process.env.MERLIN_PUBLIC_URL, process.env.DASHBOARD_OPEN) ? '1' : '0';
 	const server = startHttp(env, port, process.env.MERLIN_PUBLIC_URL, host);
 	console.error(`merlin-mcp listening on ${host}:${port} (POST /mcp)`);
 	const stop = () => server.close(() => process.exit(0));

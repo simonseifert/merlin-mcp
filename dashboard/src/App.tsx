@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { AuthError, currentAcademicYear, fetchDashboard, getMerlin, isDemo, lastDashboard, pendingYear, signIn, signOut, tokenFromHash, type MerlinSession } from './api';
+import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
+import { AuthError, fetchDashboard, isDemo, lastDashboard } from './api';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
 import { relative } from './format';
@@ -10,7 +10,6 @@ import Overview from './views/Overview';
 import Courses from './views/Courses';
 import Calendar from './views/Calendar';
 import Exams from './views/Exams';
-import Login from './views/Login';
 
 const Scene = lazy(() => import('./three/Scene'));
 
@@ -43,10 +42,7 @@ export default function App() {
 	const [data, setData] = useState<Dashboard | undefined>(lastDashboard);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
-	const [authKind, setAuthKind] = useState<'merlin' | 'key' | undefined>(undefined);
-	// A token the browser handed back to us after SRCE sign-in (#tok=…): sign in with it on load.
-	const hashToken = useMemo(() => tokenFromHash(), []);
-	const [booting, setBooting] = useState(() => !!hashToken);
+	const [noKey, setNoKey] = useState(false);
 	const [intro, setIntro] = useState(() => { try { return !sessionStorage.getItem('marlon.introSeen'); } catch { return true; } });
 	const dark = useDark();
 	const reduce = useReducedMotion();
@@ -66,37 +62,20 @@ export default function App() {
 		setLoading(true);
 		setError(undefined);
 		try {
-			setData(await fetchDashboard(fresh));
+			// Each part (main, points, announcements) shows as soon as it lands.
+			await fetchDashboard(fresh, setData);
 		} catch (err) {
 			if (err instanceof AuthError) {
 				setData(undefined);
-				setAuthKind(err.kind);
+				setNoKey(true);
 			} else setError(err instanceof Error ? err.message : 'Nešto je pošlo krivo.');
 		} finally {
 			setLoading(false);
 		}
 	}, []);
 	useEffect(() => {
-		if (!authKind && !hashToken) void load();
-	}, [load, authKind, hashToken]);
-
-	// Auto-return from SRCE: a token came back in the URL — validate and enter, no copy needed.
-	useEffect(() => {
-		if (!hashToken) return;
-		(async () => {
-			try {
-				await signIn(hashToken, pendingYear() ?? currentAcademicYear());
-				setAuthKind(undefined);
-				await load(true);
-			} catch (err) {
-				setError(err instanceof Error ? err.message : 'Prijava nije uspjela.');
-				setAuthKind('merlin');
-			} finally {
-				setBooting(false);
-			}
-		})();
-		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [hashToken]);
+		void load();
+	}, [load]);
 
 	return (
 		<MotionConfig reducedMotion="user">
@@ -117,9 +96,7 @@ export default function App() {
 					{intro && <Intro key="intro" onDone={() => { setIntro(false); try { sessionStorage.setItem('marlon.introSeen', '1'); } catch { /* private mode */ } }} />}
 				</AnimatePresence>
 
-				{authKind === 'merlin' ? (
-					<Login notice={error} onDone={(s: MerlinSession) => { setError(undefined); setAuthKind(undefined); setData(undefined); void load(true); void s; }} />
-				) : authKind === 'key' ? (
+				{noKey ? (
 					<NoKey />
 				) : (
 					<motion.div className="shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.9, duration: 0.6 }}>
@@ -141,11 +118,6 @@ export default function App() {
 								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label="Osvježi" disabled={loading}>
 									<svg width="16" height="16" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>
-								{getMerlin() && (
-									<button className="icon-btn" onClick={() => { signOut(); setData(undefined); setAuthKind('merlin'); }} aria-label="Odjava" title="Odjava">
-										<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
-									</button>
-								)}
 							</div>
 						</header>
 
@@ -174,7 +146,7 @@ export default function App() {
 								</AnimatePresence>
 							)}
 						</main>
-						<footer className="foot muted small">Samo čita iz Merlina · podaci se osvježavaju najviše svakih 5 minuta</footer>
+						<footer className="foot muted small">Samo čita iz Merlina · bodovi se osvježavaju najviše svakih 15 minuta, ostalo svakih 5</footer>
 					</motion.div>
 				)}
 			</div>

@@ -59,7 +59,7 @@ import {
 } from './lib.js';
 import { extractFileText, READ_FILE_MAX_BYTES } from './filetext.js';
 import { notifierConfigured, notifyOutcome, notifyPending, type NotifyEnv } from './notify.js';
-import { handleDashboard, handleMerlinLogin, isMerlinToken } from './dashboard.js';
+import { handleDashboard } from './dashboard.js';
 import { DAILY_SEND_CAP, PENDING_TTL_MS, type ApprovalsApi, type PendingSend } from './approvals.js';
 
 export interface Env extends NotifyEnv {
@@ -71,7 +71,6 @@ export interface Env extends NotifyEnv {
 	MCP_BEARER: string; // Your own shared secret to gate the MCP endpoint (secret)
 	DASHBOARD_KEY?: string; // secret that opens GET /api/dashboard only (the web dashboard keeps it in the browser)
 	DASHBOARD_OPEN?: string; // "1": /api/dashboard needs no key. Set by src/node.ts only for a loopback-only server; never on Workers
-	DASHBOARD_MULTIUSER?: string; // "1": each visitor signs in with their own Merlin token (sent per request, never stored)
 	API_BEARER?: string; // secret for /api/* (automation); see README "Rotating the bearers"
 	LEGACY_API_BEARER?: string; // var: "1" lets MCP_BEARER open /api/* too (old single-bearer setups); anything else, or unset, keeps them separate
 	RELAY_BEARER?: string; // secret for GET /api/pending (the approval relay only); without it (and without a NOTIFY_* channel) moodle_send_message is not offered
@@ -251,11 +250,16 @@ export function __resetCaches(): void {
 
 const TEN_MIN = 10 * 60_000;
 
+/**
+ * core_webservice_get_site_info, shared for a minute: moodle_whoami and the first getUserId of a
+ * request often ask at the same moment (the dashboard does), and one call answers both.
+ */
+function getSiteInfo(env: Env, year?: string): Promise<Record<string, unknown>> {
+	return cached(`siteinfo:${year ?? 'default'}`, 60_000, () => moodleCall<Record<string, unknown>>(env, 'core_webservice_get_site_info', {}, year));
+}
+
 async function getUserId(env: Env, year?: string): Promise<number> {
-	return cached(`uid:${year ?? 'default'}`, 60 * 60_000, async () => {
-		const info = await moodleCall<{ userid: number }>(env, 'core_webservice_get_site_info', {}, year);
-		return info.userid;
-	});
+	return cached(`uid:${year ?? 'default'}`, 60 * 60_000, async () => Number((await getSiteInfo(env, year)).userid));
 }
 
 type Course = Record<string, unknown> & { id: number; fullname?: string; shortname?: string };
@@ -1150,7 +1154,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		{ year: listYearParam },
 		async ({ year }) => {
 			const fan = await fanOut(await yearsFor(env(), year), async (y) => {
-				const info = await moodleCall<Record<string, unknown>>(env(), 'core_webservice_get_site_info', {}, y);
+				const info = await getSiteInfo(env(), y);
 				// userprivateaccesskey alone downloads files via /tokenpluginfile.php and never
 				// expires; the 450-entry functions list is noise. Neither belongs in model context.
 				const { userprivateaccesskey: _key, functions, ...rest } = info;
@@ -1343,9 +1347,10 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		{
 			days_ahead: z.number().int().min(1).max(365).default(30),
 			limit: z.number().int().min(1).max(50).default(30).describe('Max items (Moodle caps this at 50)'),
+			quiz_details: z.boolean().default(true).describe('Add time limit and attempts left to quiz items (a few extra calls); false skips them'),
 			year: listYearParam,
 		},
-		async ({ days_ahead, limit, year }) => {
+		async ({ days_ahead, limit, quiz_details, year }) => {
 			const now = Math.floor(Date.now() / 1000);
 			const fan = await fanOut(await yearsFor(env(), year), async (y) => {
 				const data = await moodleCall<{ events: Array<Record<string, unknown>> }>(
@@ -1356,7 +1361,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 				);
 				const events = data.events ?? [];
 				// Quiz items get the quiz's time limit and attempts left (settings + attempt list only).
-				const quizzes = events.some((e) => e.modulename === 'quiz') ? await getQuizzes(env(), y).catch(() => [] as Quiz[]) : [];
+				const quizzes = quiz_details && events.some((e) => e.modulename === 'quiz') ? await getQuizzes(env(), y).catch(() => [] as Quiz[]) : [];
 				// Quiz ids and cmids are separate id spaces, so never mix them in one key. Prefer the cmid
 				// from the event link (mod/quiz/view.php?id=<cmid>); Merlin's `instance` is the cmid too.
 				const byCmid = new Map(quizzes.filter((q) => q.coursemodule).map((q) => [Number(q.coursemodule), q]));
@@ -2132,23 +2137,13 @@ export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: P
 		return handlePending(env, url.origin);
 	}
 
-	// The web dashboard (dashboard/). Multi-user: each visitor sends their own Merlin token (X-Merlin-Token),
-	// used for that request only and never stored. Single-user: the shared token, gated by DASHBOARD_KEY
-	// (or opened on a loopback-only Node server).
-	if (url.pathname === '/api/dashboard' || url.pathname === '/api/merlin-login') {
-		if (env.DASHBOARD_MULTIUSER === '1') {
-			const userToken = (request.headers.get('X-Merlin-Token') ?? '').trim();
-			if (!isMerlinToken(userToken)) return jsonResponse({ error: 'Prijava je obavezna: pošalji svoj Merlin token.', login: true }, { status: 401 });
-			return url.pathname === '/api/merlin-login'
-				? handleMerlinLogin(request, env, registerTools as never, userToken)
-				: handleDashboard(request, env, registerTools as never, { userToken });
-		}
+	// The web dashboard (dashboard/): the server's own token, gated by DASHBOARD_KEY (or API_BEARER),
+	// or opened on a loopback-only Node server.
+	if (url.pathname === '/api/dashboard') {
 		const header = request.headers.get('Authorization') ?? '';
-		const open = env.DASHBOARD_OPEN === '1';
-		if (!open && !(await bearerIs(header, env.DASHBOARD_KEY)) && !(await authorized(env, url.pathname, header))) {
+		if (env.DASHBOARD_OPEN !== '1' && !(await bearerIs(header, env.DASHBOARD_KEY)) && !(await authorized(env, url.pathname, header))) {
 			return new Response('Unauthorized', { status: 401 });
 		}
-		if (url.pathname === '/api/merlin-login') return jsonResponse({ error: 'Login nije uključen (DASHBOARD_MULTIUSER).' }, { status: 404 });
 		return handleDashboard(request, env, registerTools as never);
 	}
 

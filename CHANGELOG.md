@@ -3,7 +3,9 @@
 ## Unreleased
 
 - Web dashboard at `/dashboard/` (folder `dashboard/`): points per course with item detail, a month calendar, exams, seminars and announcements, in a frosted-glass UI over a three.js scene. Served as Workers static assets, or by the Node server from `dashboard/dist`; the Docker image builds it.
-- `GET /api/dashboard`: one read-only answer for the page, built from the existing tools and cached for 5 minutes. Opened by a new optional secret, `DASHBOARD_KEY`, which opens nothing else (`API_BEARER` also works).
+- `GET /api/dashboard` in three parts (`part=main`, `grades`, `announcements`), each its own request with its own Workers call budget, cached 5, 15 and 10 minutes. The page loads them side by side and shows each as it lands, starting from the copy it saved last time. Opened by a new optional secret, `DASHBOARD_KEY`, which opens nothing else (`API_BEARER` also works). The dashboard always reads the server's own token: one server, one person's Merlin.
+- `moodle_get_upcoming_deadlines` takes `quiz_details` (default `true`); `false` skips the quiz settings and attempt lookups. `moodle_whoami` and the first user-id lookup of a request now share one `core_webservice_get_site_info` call (cached for a minute).
+
 ## 0.6.2 (2026-11-23)
 
 - README: new "Building on it" section (watchers, a course and teacher catalogue, a file archive, fully local use), 24 tools listed, notes on search scope and the teacher list. Removed the stale Durable Object note.
