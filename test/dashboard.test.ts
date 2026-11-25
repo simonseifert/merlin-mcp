@@ -209,8 +209,16 @@ describe('GET /api/dashboard', () => {
 	});
 
 	it('needs no key only when the Node server says it is loopback-only', async () => {
-		const res = await worker.fetch(new Request('https://merlin.example/api/dashboard'), { ...ENV, DASHBOARD_OPEN: '1' }, ctx);
-		expect(res.status).toBe(200);
+		const local = (host: string, origin?: string) =>
+			worker.fetch(new Request('http://127.0.0.1:8787/api/dashboard', { headers: { host, ...(origin ? { origin } : {}) } }), { ...ENV, DASHBOARD_OPEN: '1' }, ctx);
+		expect((await local('127.0.0.1:8787')).status).toBe(200);
+		expect((await local('localhost:8787', 'http://localhost:5173')).status).toBe(200);
+		expect((await local('[::1]:8787')).status).toBe(200);
+		// DNS rebinding: a foreign name pointed at 127.0.0.1, or a foreign page asking, gets no free pass.
+		expect((await local('evil.example:8787')).status).toBe(401);
+		expect((await local('127.0.0.1:8787', 'http://evil.example')).status).toBe(401);
+		expect((await local('127.0.0.1.evil.example')).status).toBe(401);
+		expect((await worker.fetch(new Request('https://merlin.example/api/dashboard'), { ...ENV, DASHBOARD_OPEN: '1' }, ctx)).status).toBe(401);
 		// Open mode opens the dashboard route only.
 		expect((await worker.fetch(new Request('https://merlin.example/api/call?wsfunction=core_webservice_get_site_info'), { ...ENV, DASHBOARD_OPEN: '1' }, ctx)).status).toBe(401);
 		expect(dashboardOpen('127.0.0.1')).toBe(true);

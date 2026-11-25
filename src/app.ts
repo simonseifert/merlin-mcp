@@ -2114,6 +2114,25 @@ function errorResponse(err: unknown, env: Env): Response {
 	return res;
 }
 
+const LOOPBACK_HOST = /^(localhost|127\.0\.0\.1|\[::1\])(:\d+)?$/i;
+
+/**
+ * Key-less dashboard access (a loopback-only Node server) also needs the request itself to be
+ * addressed to loopback: a web page could otherwise point its own domain at 127.0.0.1 (DNS
+ * rebinding) and read /api/dashboard from the visitor's browser. Host must be a loopback name,
+ * and a cross-site Origin, if sent, must be one too.
+ */
+export function loopbackRequest(request: Request): boolean {
+	if (!LOOPBACK_HOST.test(request.headers.get('host') ?? '')) return false;
+	const origin = request.headers.get('origin');
+	if (!origin) return true;
+	try {
+		return LOOPBACK_HOST.test(new URL(origin).host);
+	} catch {
+		return false;
+	}
+}
+
 export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: Promise<unknown>): void }): Promise<Response> {
 	const url = new URL(request.url);
 
@@ -2141,7 +2160,8 @@ export async function handle(request: Request, env: Env, ctx?: { waitUntil?(p: P
 	// or opened on a loopback-only Node server.
 	if (url.pathname === '/api/dashboard') {
 		const header = request.headers.get('Authorization') ?? '';
-		if (env.DASHBOARD_OPEN !== '1' && !(await bearerIs(header, env.DASHBOARD_KEY)) && !(await authorized(env, url.pathname, header))) {
+		const open = env.DASHBOARD_OPEN === '1' && loopbackRequest(request);
+		if (!open && !(await bearerIs(header, env.DASHBOARD_KEY)) && !(await authorized(env, url.pathname, header))) {
 			return new Response('Unauthorized', { status: 401 });
 		}
 		return handleDashboard(request, env, registerTools as never);
