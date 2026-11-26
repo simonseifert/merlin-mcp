@@ -1,21 +1,20 @@
 import { motion } from 'motion/react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { extractToken, isLaunchLink, launchUrl, registerAuthHandler, signIn, type MerlinSession } from '../api';
+import { extractToken, getSessions, isLaunchLink, launchUrl, registerAuthHandler, signIn, yearOptions, type MerlinSession } from '../api';
 import { MarlonMascot, Wordmark } from '../components/brand';
 import { spring } from '../components/ui';
 
-/** Academic years to offer: the current one (rolls over 1 Oct) first, plus the two around it. */
-function yearOptions(now = new Date()): string[] {
-	const y = now.getFullYear();
-	const start = now.getMonth() >= 9 ? y : y - 1;
-	return [start, start - 1, start + 1].map((s) => `${s}-${s + 1}`);
-}
 
 type Step = 'intro' | 'paste';
 
-export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) => void; notice?: string }) {
+/**
+ * Sign in to Merlin. Also used to add another academic year (each year is its own site with its own token):
+ * then `onCancel` is set, years already signed in are marked, and the first free year is preselected.
+ */
+export default function Login({ onDone, onCancel, notice, initialYear }: { onDone: (s: MerlinSession) => void; onCancel?: () => void; notice?: string; initialYear?: string }) {
 	const years = useMemo(() => yearOptions(), []);
-	const [year, setYear] = useState(years[0]);
+	const signed = useMemo(() => new Set(getSessions().map((s) => s.year)), []);
+	const [year, setYear] = useState(() => (initialYear && years.includes(initialYear) ? initialYear : years.find((y) => !signed.has(y)) ?? years[0]));
 	const [step, setStep] = useState<Step>('intro');
 	const [value, setValue] = useState('');
 	const [busy, setBusy] = useState(false);
@@ -98,19 +97,19 @@ export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) =
 					<p className="muted">Tvoj Merlin: bodovi, kalendar, ispiti i seminari na jednom mjestu. Prijavi se svojim Merlin računom — lozinku upisuješ samo na stranici SRCE-a, mi je nikad ne vidimo.</p>
 				</div>
 
-				{notice && <p className="login__error">{notice}</p>}
+				{notice && <p className="login__error" role="alert">{notice}</p>}
 
-				<label className="login__year">
-					<span className="small muted">Akademska godina</span>
+				<div className="login__year" role="group" aria-labelledby="login-year-label">
+					<span className="small muted" id="login-year-label">Akademska godina</span>
 					<div className="segmented segmented--small">
 						{years.map((y) => (
-							<button key={y} className={year === y ? 'is-active' : ''} onClick={() => setYear(y)} type="button">
+							<button key={y} className={year === y ? 'is-active' : ''} onClick={() => setYear(y)} aria-pressed={year === y} type="button">
 								{year === y && <motion.span layoutId="year-pill" className="segmented__pill" transition={spring} />}
-								<span>{y}</span>
+								<span>{y}{signed.has(y) ? ' ✓' : ''}</span>
 							</button>
 						))}
 					</div>
-				</label>
+				</div>
 
 				{step === 'intro' ? (
 					<>
@@ -138,7 +137,7 @@ export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) =
 				)}
 
 				{error && (
-					<motion.p className="login__error" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}>
+					<motion.p className="login__error" role="alert" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }}>
 						{error}
 					</motion.p>
 				)}
@@ -153,6 +152,11 @@ export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) =
 					</ol>
 				</details>
 			</motion.div>
+			{onCancel && (
+				<button className="link" onClick={onCancel} type="button">
+					Odustani i vrati se
+				</button>
+			)}
 			<p className="login__foot small muted">Token ostaje samo u ovom pregledniku. Server ga koristi za dohvat tvojih podataka i ne sprema ga.</p>
 		</div>
 	);

@@ -15,7 +15,8 @@
 import type { ToolCaller } from '../../../src/dashboard-build';
 import { stripHtml, truncate } from '../../../src/lib';
 
-export const MERLIN_ORIGIN = 'https://moodle.srce.hr';
+/** Merlin's address. A build can point it at a stand-in (VITE_MERLIN_ORIGIN) to try the page without an account. */
+export const MERLIN_ORIGIN: string = (import.meta.env?.VITE_MERLIN_ORIGIN as string | undefined) || 'https://moodle.srce.hr';
 
 /** Everything direct mode may ask Merlin. All read-only; nothing here sends, submits or marks read. */
 export const DIRECT_FUNCTIONS: ReadonlySet<string> = new Set([

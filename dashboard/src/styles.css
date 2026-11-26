@@ -1346,6 +1346,36 @@ a:focus-visible,
 	outline-offset: 2px;
 }
 
+/* academic year switcher (direct mode) */
+.year-select {
+	appearance: none;
+	-webkit-appearance: none;
+	height: 36px;
+	padding: 0 30px 0 14px;
+	border-radius: 999px;
+	border: 1px solid var(--line);
+	background-color: var(--glass);
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 12px center;
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
+	backdrop-filter: blur(20px) saturate(180%);
+	box-shadow: var(--shadow), var(--inner);
+	color: var(--text);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 560;
+	cursor: pointer;
+}
+.year-select option {
+	color: #1d1d1f;
+}
+@media (pointer: coarse) {
+	.year-select {
+		height: 44px;
+	}
+}
+
 /* ---------- past things ---------- */
 .is-past,
 .cell--past:not(.cell--sel) {

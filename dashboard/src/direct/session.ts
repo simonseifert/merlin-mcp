@@ -5,55 +5,124 @@
  * web+marlon return handler are Leon's, from the first version of the dashboard.
  */
 
-import { createClient, isAuthError, MerlinError } from './merlin';
+import { createClient, isAuthError, MerlinError, MERLIN_ORIGIN } from './merlin';
 
 const MERLIN = 'marlon.merlin';
 const LAST = 'marlon.last';
 
+/** The active year's session: what every call uses. */
 export interface MerlinSession {
 	token: string;
 	year: string;
 	fullname?: string;
 }
-let memMerlin: MerlinSession | undefined;
-export function getMerlin(): MerlinSession | undefined {
+
+/**
+ * Each academic year is a separate Moodle site with its own token, so a student can be signed in to
+ * several at once. Stored as `{ sessions: { [year]: { token, fullname } }, active: year }`.
+ */
+interface Stored {
+	sessions: Record<string, { token: string; fullname?: string }>;
+	active?: string;
+}
+
+let mem: Stored | undefined;
+
+/** Reads the stored shape, and migrates the old single `{ token, year, fullname }` one. */
+function normalise(v: unknown): Stored {
+	const o = (v ?? {}) as { sessions?: Record<string, { token?: unknown; fullname?: unknown }>; active?: unknown; token?: unknown; year?: unknown; fullname?: unknown };
+	const sessions: Stored['sessions'] = {};
+	if (o.sessions && typeof o.sessions === 'object') {
+		for (const [year, s] of Object.entries(o.sessions)) {
+			if (s && typeof s.token === 'string') sessions[year] = { token: s.token, fullname: typeof s.fullname === 'string' ? s.fullname : undefined };
+		}
+	} else if (typeof o.token === 'string' && typeof o.year === 'string') {
+		sessions[o.year] = { token: o.token, fullname: typeof o.fullname === 'string' ? o.fullname : undefined };
+	}
+	const years = Object.keys(sessions);
+	const active = typeof o.active === 'string' && sessions[o.active] ? o.active : typeof o.year === 'string' && sessions[o.year] ? o.year : years.sort().reverse()[0];
+	return { sessions, active };
+}
+
+function read(): Stored {
 	try {
 		const raw = localStorage.getItem(MERLIN);
-		return raw ? (JSON.parse(raw) as MerlinSession) : memMerlin;
+		if (raw) return normalise(JSON.parse(raw));
 	} catch {
-		return memMerlin;
+		/* unreadable: fall through to memory */
 	}
+	return mem ?? { sessions: {} };
 }
-export function setMerlin(s: MerlinSession): void {
-	// A different account (or year) must never see the previous one's saved page.
-	const prev = getMerlin();
-	if (prev?.token !== s.token || prev?.year !== s.year) clearSaved();
-	memMerlin = s;
+
+function write(s: Stored): void {
+	mem = s;
 	try {
 		localStorage.setItem(MERLIN, JSON.stringify(s));
 	} catch {
-		/* private mode: session lives for this page */
+		/* private mode: the sessions live for this page */
 	}
 }
+
+/** The active year's session, if signed in. */
+export function getMerlin(): MerlinSession | undefined {
+	const st = read();
+	const s = st.active ? st.sessions[st.active] : undefined;
+	return st.active && s ? { token: s.token, year: st.active, fullname: s.fullname } : undefined;
+}
+
+/** Every signed-in year, newest first. */
+export function getSessions(): MerlinSession[] {
+	const st = read();
+	return Object.keys(st.sessions)
+		.sort()
+		.reverse()
+		.map((year) => ({ token: st.sessions[year].token, year, fullname: st.sessions[year].fullname }));
+}
+
+/** Make an already signed-in year the active one. */
+export function setActiveYear(year: string): void {
+	const st = read();
+	if (st.sessions[year]) write({ ...st, active: year });
+}
+
+/** Save a session for its year and make it active. A different account must never see the previous one's saved pages or tokens. */
+export function setMerlin(s: MerlinSession): void {
+	const st = read();
+	const prevSameYear = st.sessions[s.year];
+	const otherAccount =
+		Object.values(st.sessions).some((v) => v.fullname && s.fullname && v.fullname !== s.fullname) ||
+		(!!prevSameYear && prevSameYear.token !== s.token && !(prevSameYear.fullname && prevSameYear.fullname === s.fullname));
+	if (otherAccount) clearSaved();
+	write({ sessions: { ...(otherAccount ? {} : st.sessions), [s.year]: { token: s.token, fullname: s.fullname } }, active: s.year });
+}
+
 /** Forget every saved page and part in this browser. */
 function clearSaved(): void {
 	try {
-		localStorage.removeItem(LAST);
-		for (const k of Object.keys(localStorage)) if (k.startsWith('marlon.part.')) localStorage.removeItem(k);
+		for (const k of Object.keys(localStorage)) if (k === LAST || k.startsWith(`${LAST}.`) || k.startsWith('marlon.part.')) localStorage.removeItem(k);
 	} catch {
 		/* ignore */
 	}
 }
 
+/** Sign out of every year: tokens and saved pages are removed from this browser. */
 export function signOut(): void {
-	memMerlin = undefined;
+	mem = undefined;
 	try {
 		localStorage.removeItem(MERLIN);
-		clearSaved();
 	} catch {
 		/* ignore */
 	}
+	clearSaved();
 }
+
+/** Academic years to offer: the current one (rolls over 1 Oct) and the two before it. */
+export function yearOptions(now = new Date()): string[] {
+	const y = now.getFullYear();
+	const start = now.getMonth() >= 9 ? y : y - 1;
+	return [start, start - 1, start - 2].map((s) => `${s}-${s + 1}`);
+}
+
 
 /**
  * A token from what the student pasted: either the whole input is a bare 32-hex token, or it holds an
@@ -110,7 +179,7 @@ export function launchUrl(year: string, autoReturn = false): string {
 	const scheme = autoReturn ? PROTO : 'merlin-token';
 	// encodeURIComponent is essential: a literal "+" in a query string decodes to a space, so
 	// urlscheme=web+marlon would reach Moodle as "web marlon" and be rejected. Send it as web%2Bmarlon.
-	return `https://moodle.srce.hr/${year}/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=${passport}&urlscheme=${encodeURIComponent(scheme)}`;
+	return `${MERLIN_ORIGIN}/${year}/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=${passport}&urlscheme=${encodeURIComponent(scheme)}`;
 }
 
 const PENDING_MAX_MS = 15 * 60_000;

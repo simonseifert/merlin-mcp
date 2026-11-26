@@ -1,7 +1,7 @@
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLite } from './lite';
-import { AuthError, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, signIn, signOut, tokenFromHash } from './api';
+import { AuthError, DIRECT, fetchDashboard, getMerlin, getSessions, isDemo, lastDashboard, setActiveYear, signIn, signOut, tokenFromHash } from './api';
 import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
@@ -39,6 +39,8 @@ const webgl = (() => {
 	}
 })();
 
+const ADD_YEAR = '+add';
+
 export default function App() {
 	const [route, setRoute] = useState<Route>(routeFromHash);
 	const [data, setData] = useState<Dashboard | undefined>(lastDashboard);
@@ -55,6 +57,9 @@ export default function App() {
 		try { localStorage.setItem('marlon.introSeen', '1'); } catch { /* private mode */ }
 	}, []);
 	const [lite, toggleLite] = useLite();
+	// Direct mode: every academic year signed in to (each its own token), and the Login screen opened to add one.
+	const [sessions, setSessions] = useState(getSessions);
+	const [adding, setAdding] = useState(false);
 	const inflight = useRef(false);
 	const loadedAt = useRef(Date.now());
 	const dark = useDark();
@@ -110,11 +115,35 @@ export default function App() {
 		return () => document.removeEventListener('visibilitychange', on);
 	}, [load, auth]);
 
+	/** Signed in (first time, a dead token renewed, or another year added): show that year's page. */
+	const loginDone = useCallback(() => {
+		setError(undefined);
+		setSessions(getSessions());
+		setData(lastDashboard());
+		setAdding(false);
+		// Coming from the sign-in screen the effect above loads; adding a year from the page does not.
+		if (auth) setAuth(undefined);
+		else void load();
+	}, [auth, load]);
+
+	/** Switch to another signed-in year: its saved page at once, then a normal (cache-aware) load. */
+	const switchYear = useCallback(
+		(year: string) => {
+			setActiveYear(year);
+			setSessions(getSessions());
+			setError(undefined);
+			setData(lastDashboard());
+			void load();
+		},
+		[load]
+	);
+
 	// Auto-return from SRCE (desktop): the token came back in the URL, so validate it and go in.
 	useEffect(() => {
 		if (!hashToken) return;
 		signIn(hashToken.token, hashToken.year)
 			.then(() => {
+				setSessions(getSessions());
 				setAuth(undefined);
 				return load(true);
 			})
@@ -144,8 +173,8 @@ export default function App() {
 					{intro && <Intro key="intro" onDone={endIntro} />}
 				</AnimatePresence>
 
-				{auth === 'merlin' ? (
-					<Login notice={error} onDone={() => { setError(undefined); setData(undefined); setAuth(undefined); }} />
+				{auth === 'merlin' || adding ? (
+					<Login notice={error} initialYear={adding ? undefined : getMerlin()?.year} onCancel={adding ? () => setAdding(false) : undefined} onDone={loginDone} />
 				) : auth === 'key' ? (
 					<NoKey />
 				) : (
@@ -165,6 +194,19 @@ export default function App() {
 							</nav>
 							<div className="topbar__right">
 								{data && <span className="muted small updated">ažurirano {relative(Math.min(data.generated_at, now), now)}</span>}
+								{DIRECT && sessions.length > 0 && (
+									<select
+										className="year-select"
+										aria-label="Akademska godina"
+										value={getMerlin()?.year ?? ''}
+										onChange={(e) => (e.target.value === ADD_YEAR ? setAdding(true) : switchYear(e.target.value))}
+									>
+										{sessions.map((s) => (
+											<option key={s.year} value={s.year}>{s.year}</option>
+										))}
+										<option value={ADD_YEAR}>+ Dodaj godinu…</option>
+									</select>
+								)}
 								{!reduce && (
 									<button type="button" className="icon-btn" onClick={toggleLite} aria-pressed={lite} aria-label="Lagani način (bez 3D pozadine)" title={lite ? 'Lagani način je uključen' : 'Lagani način: isključi 3D pozadinu'}>
 										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
@@ -176,7 +218,7 @@ export default function App() {
 									<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>
 								{DIRECT && getMerlin() && (
-									<button className="icon-btn" onClick={() => { signOut(); setData(undefined); setAuth('merlin'); }} aria-label="Odjava i brisanje tokena" title="Odjava (briše token iz ovog preglednika)">
+									<button className="icon-btn" onClick={() => { signOut(); setSessions([]); setData(undefined); setAuth('merlin'); }} aria-label="Odjava i brisanje tokena" title="Odjava (briše tokene svih godina iz ovog preglednika)">
 										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 									</button>
 								)}
