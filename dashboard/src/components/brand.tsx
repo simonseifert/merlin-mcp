@@ -22,19 +22,25 @@ export default function Intro({ onDone }: { onDone: () => void }) {
 
 	useEffect(() => {
 		const t = setTimeout(onDone, reduce ? 450 : 3200);
-		return () => clearTimeout(t);
+		// Any key skips it (a click does too, on the overlay itself). Shown once per browser.
+		const skip = () => onDone();
+		window.addEventListener('keydown', skip);
+		return () => {
+			clearTimeout(t);
+			window.removeEventListener('keydown', skip);
+		};
 	}, [onDone, reduce]);
 
 	if (reduce) {
 		return (
-			<motion.div className="intro" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ duration: 0.45 }}>
+			<motion.div className="intro" onClick={onDone} aria-hidden="true" initial={{ opacity: 1 }} animate={{ opacity: 0 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ duration: 0.45 }}>
 				<Wordmark className="wordmark--xl" />
 			</motion.div>
 		);
 	}
 
 	return (
-		<motion.div className="intro" initial={{ opacity: 1 }} animate={{ opacity: 0 }} transition={{ delay: 2.75, duration: 0.45, ease: 'easeIn' }}>
+		<motion.div className="intro" onClick={onDone} aria-hidden="true" initial={{ opacity: 1 }} animate={{ opacity: 0 }} exit={{ opacity: 0, transition: { duration: 0.2 } }} transition={{ delay: 2.75, duration: 0.45, ease: 'easeIn' }}>
 			<motion.div className="intro__stage" initial={{ scale: 1 }} animate={{ scale: 1.05 }} transition={{ delay: 2.75, duration: 0.45 }}>
 				{/* the blue disc */}
 				<motion.span

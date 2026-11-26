@@ -1,5 +1,6 @@
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLite } from './lite';
 import { AuthError, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, signIn, signOut, tokenFromHash } from './api';
 import Login from './views/Login';
 import type { Dashboard } from './types';
@@ -47,7 +48,15 @@ export default function App() {
 	const [auth, setAuth] = useState<'key' | 'merlin' | undefined>(() => (DIRECT && !isDemo() && !getMerlin() ? 'merlin' : undefined));
 	// Direct mode: a token the browser handed back after SRCE sign-in (#tok=…), signed in with on load.
 	const hashToken = useMemo(() => (DIRECT ? tokenFromHash() : null), []);
-	const [intro, setIntro] = useState(() => { try { return !sessionStorage.getItem('marlon.introSeen'); } catch { return true; } });
+	const [intro, setIntro] = useState(() => { try { return !localStorage.getItem('marlon.introSeen'); } catch { return true; } });
+	const introShown = useRef(intro).current;
+	const endIntro = useCallback(() => {
+		setIntro(false);
+		try { localStorage.setItem('marlon.introSeen', '1'); } catch { /* private mode */ }
+	}, []);
+	const [lite, toggleLite] = useLite();
+	const inflight = useRef(false);
+	const loadedAt = useRef(Date.now());
 	const dark = useDark();
 	const reduce = useReducedMotion();
 	const now = useNow(60_000);
@@ -65,24 +74,41 @@ export default function App() {
 		window.scrollTo({ top: 0, behavior: 'smooth' });
 	}, []);
 
-	const load = useCallback(async (fresh = false) => {
-		setLoading(true);
-		setError(undefined);
+	/** `quiet`: a background refresh (coming back to the tab). No spinner, and a failure keeps what is on screen. */
+	const load = useCallback(async (fresh = false, quiet = false) => {
+		inflight.current = true;
+		if (!quiet) {
+			setLoading(true);
+			setError(undefined);
+		}
 		try {
 			// Each part (main, points, announcements) shows as soon as it lands.
 			await fetchDashboard(fresh, setData);
+			loadedAt.current = Date.now();
 		} catch (err) {
 			if (err instanceof AuthError) {
 				setData(undefined);
 				setAuth(err.kind);
-			} else setError(err instanceof Error ? err.message : 'Nešto je pošlo krivo.');
+			} else if (!quiet) setError(err instanceof Error ? err.message : 'Nešto je pošlo krivo.');
 		} finally {
-			setLoading(false);
+			inflight.current = false;
+			if (!quiet) setLoading(false);
 		}
 	}, []);
 	useEffect(() => {
 		if (!auth && !hashToken) void load();
 	}, [load, auth, hashToken]);
+
+	// Back on the tab after a while: refresh quietly when the page is more than 5 minutes old.
+	useEffect(() => {
+		if (auth) return;
+		const on = () => {
+			if (document.visibilityState !== 'visible' || inflight.current) return;
+			if (Date.now() - loadedAt.current > 5 * 60_000) void load(false, true);
+		};
+		document.addEventListener('visibilitychange', on);
+		return () => document.removeEventListener('visibilitychange', on);
+	}, [load, auth]);
 
 	// Auto-return from SRCE (desktop): the token came back in the URL, so validate it and go in.
 	useEffect(() => {
@@ -107,7 +133,7 @@ export default function App() {
 					<span className={`orb orb--b orb--${route}`} />
 					<span className={`orb orb--c orb--${route}`} />
 				</div>
-				{!reduce && webgl && (
+				{!reduce && !lite && webgl && (
 					<Suspense fallback={null}>
 						<Scene route={route} dark={dark} />
 					</Suspense>
@@ -115,7 +141,7 @@ export default function App() {
 				<div className="grain" aria-hidden />
 
 				<AnimatePresence>
-					{intro && <Intro key="intro" onDone={() => { setIntro(false); try { sessionStorage.setItem('marlon.introSeen', '1'); } catch { /* private mode */ } }} />}
+					{intro && <Intro key="intro" onDone={endIntro} />}
 				</AnimatePresence>
 
 				{auth === 'merlin' ? (
@@ -123,7 +149,7 @@ export default function App() {
 				) : auth === 'key' ? (
 					<NoKey />
 				) : (
-					<motion.div className="shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.9, duration: 0.6 }}>
+					<motion.div className="shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce || !introShown ? 0 : 0.9, duration: 0.6 }}>
 						<header className="topbar">
 							<div className="brand">
 								<Wordmark className="brand__name" />
@@ -139,6 +165,13 @@ export default function App() {
 							</nav>
 							<div className="topbar__right">
 								{data && <span className="muted small updated">ažurirano {relative(Math.min(data.generated_at, now), now)}</span>}
+								{!reduce && (
+									<button type="button" className="icon-btn" onClick={toggleLite} aria-pressed={lite} aria-label="Lagani način (bez 3D pozadine)" title={lite ? 'Lagani način je uključen' : 'Lagani način: isključi 3D pozadinu'}>
+										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
+											{lite ? <path d="M8 2l5 2.8v5.4L8 13 3 10.2V4.8L8 2z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round" /> : <path d="M8 2l5 2.8v5.4L8 13 3 10.2V4.8L8 2zM8 7.9V13M3 4.8l5 3.1 5-3.1" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" />}
+										</svg>
+									</button>
+								)}
 								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label="Osvježi" disabled={loading}>
 									<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>

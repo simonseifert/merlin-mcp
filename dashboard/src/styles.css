@@ -1555,6 +1555,11 @@ h1:focus,
 	place-items: center;
 	background: var(--bg);
 	overflow: hidden;
+	cursor: pointer;
+}
+.icon-btn[aria-pressed='true'] {
+	background: var(--glass-strong);
+	color: var(--link);
 }
 .intro::after {
 	/* a soft blue glow behind the stage */
