@@ -1,6 +1,7 @@
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
-import { lazy, Suspense, useCallback, useEffect, useState } from 'react';
-import { AuthError, fetchDashboard, isDemo, lastDashboard } from './api';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { AuthError, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, signIn, signOut, tokenFromHash } from './api';
+import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
 import { relative } from './format';
@@ -42,7 +43,10 @@ export default function App() {
 	const [data, setData] = useState<Dashboard | undefined>(lastDashboard);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string>();
-	const [noKey, setNoKey] = useState(false);
+	// 'key': this server wants its #key= link. 'merlin': direct mode, sign in with your own Merlin account.
+	const [auth, setAuth] = useState<'key' | 'merlin' | undefined>(() => (DIRECT && !isDemo() && !getMerlin() ? 'merlin' : undefined));
+	// Direct mode: a token the browser handed back after SRCE sign-in (#tok=…), signed in with on load.
+	const hashToken = useMemo(() => (DIRECT ? tokenFromHash() : null), []);
 	const [intro, setIntro] = useState(() => { try { return !sessionStorage.getItem('marlon.introSeen'); } catch { return true; } });
 	const dark = useDark();
 	const reduce = useReducedMotion();
@@ -67,15 +71,30 @@ export default function App() {
 		} catch (err) {
 			if (err instanceof AuthError) {
 				setData(undefined);
-				setNoKey(true);
+				setAuth(err.kind);
 			} else setError(err instanceof Error ? err.message : 'Nešto je pošlo krivo.');
 		} finally {
 			setLoading(false);
 		}
 	}, []);
 	useEffect(() => {
-		void load();
-	}, [load]);
+		if (!auth && !hashToken) void load();
+	}, [load, auth, hashToken]);
+
+	// Auto-return from SRCE (desktop): the token came back in the URL, so validate it and go in.
+	useEffect(() => {
+		if (!hashToken) return;
+		signIn(hashToken.token, hashToken.year)
+			.then(() => {
+				setAuth(undefined);
+				return load(true);
+			})
+			.catch((err) => {
+				setError(err instanceof Error ? err.message : 'Prijava nije uspjela.');
+				setAuth('merlin');
+			});
+		// eslint-disable-next-line react-hooks/exhaustive-deps
+	}, [hashToken]);
 
 	return (
 		<MotionConfig reducedMotion="user">
@@ -96,7 +115,9 @@ export default function App() {
 					{intro && <Intro key="intro" onDone={() => { setIntro(false); try { sessionStorage.setItem('marlon.introSeen', '1'); } catch { /* private mode */ } }} />}
 				</AnimatePresence>
 
-				{noKey ? (
+				{auth === 'merlin' ? (
+					<Login notice={error} onDone={() => { setError(undefined); setData(undefined); setAuth(undefined); }} />
+				) : auth === 'key' ? (
 					<NoKey />
 				) : (
 					<motion.div className="shell" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: reduce ? 0 : 0.9, duration: 0.6 }}>
@@ -118,6 +139,11 @@ export default function App() {
 								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label="Osvježi" disabled={loading}>
 									<svg width="16" height="16" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>
+								{DIRECT && getMerlin() && (
+									<button className="icon-btn" onClick={() => { signOut(); setData(undefined); setAuth('merlin'); }} aria-label="Odjava i brisanje tokena" title="Odjava (briše token iz ovog preglednika)">
+										<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+									</button>
+								)}
 							</div>
 						</header>
 

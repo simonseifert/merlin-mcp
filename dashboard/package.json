@@ -5,7 +5,9 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build && cp _headers dist/_headers",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "build:direct": "tsc --noEmit && VITE_MERLIN_DIRECT=1 vite build",
+    "dev:direct": "VITE_MERLIN_DIRECT=1 vite"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.9",
