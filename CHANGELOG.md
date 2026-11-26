@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.7.0 (2026-11-26)
 
 **Web dashboard ("Marlon", by leonkreso784-bit, PR #12).** See DASHBOARD.md.
 - A read-only page at `/dashboard/`: points per course with item detail, a month calendar, exams, seminars and teachers' announcements, frosted glass over a three.js scene, `?demo` with invented data. Served as Workers static assets, by the Node server, and in the Docker image. `npm run dashboard` runs it locally; `npm run deploy` builds it before deploying.

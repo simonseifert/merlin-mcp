@@ -317,7 +317,7 @@ describe('/api/call allow-list', () => {
 		expect(init.method).toBe('POST');
 		expect(new URL(url).searchParams.has('wstoken')).toBe(false);
 		expect(url).not.toContain('the-moodle-token');
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.6.2 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.7.0 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client)');
 	});
 
 	it('puts the MOODLE_CONTACT address in the User-Agent when it is set', async () => {
@@ -325,7 +325,7 @@ describe('/api/call allow-list', () => {
 		const env = { ...ENV, MOODLE_CONTACT: 'ops@example.org' };
 		await worker.fetch(new Request('https://merlin-mcp.example/api/call?wsfunction=core_enrol_get_users_courses', { headers: AUTH }), env, fakeCtx());
 		const init = fetchMock.mock.calls[0][1] as RequestInit;
-		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.6.2 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: ops@example.org)');
+		expect(new Headers(init.headers).get('User-Agent')).toBe('merlin-mcp/0.7.0 (+https://github.com/simonseifert/merlin-mcp; personal read-only student client; contact: ops@example.org)');
 	});
 
 	it('never returns userprivateaccesskey through /api/call', async () => {

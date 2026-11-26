@@ -4,11 +4,11 @@
   "title": "Merlin (SRCE Moodle)",
   "description": "Read-only MCP server for Merlin (SRCE Moodle): deadlines, grades, files, news",
   "repository": { "url": "https://github.com/simonseifert/merlin-mcp", "source": "github" },
-  "version": "0.6.2",
+  "version": "0.7.0",
   "packages": [
     {
       "registryType": "oci",
-      "identifier": "ghcr.io/simonseifert/merlin-mcp:v0.6.2",
+      "identifier": "ghcr.io/simonseifert/merlin-mcp:v0.7.0",
       "transport": { "type": "stdio" },
       "packageArguments": [{ "type": "positional", "value": "--stdio" }],
       "environmentVariables": [
