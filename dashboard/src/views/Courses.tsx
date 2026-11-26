@@ -1,12 +1,13 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import type { DashCourse, Dashboard } from '../types';
-import { Bar, Empty, Glass, Ring, Sheet, listVariants } from '../components/ui';
+import { Bar, Empty, Glass, Ring, Sheet, listVariants, usePageHeading } from '../components/ui';
 import { courseColor, courseHeadline, coursePercent, fmtDate, gradedSoFar, nfmt, shortCourse } from '../format';
 
 type Sort = 'name' | 'points';
 
 export default function Courses({ data }: { data: Dashboard }) {
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const [sort, setSort] = useState<Sort>('points');
 	const [open, setOpen] = useState<DashCourse | null>(null);
 	const names = data.courses.map((c) => c.name);
@@ -16,7 +17,7 @@ export default function Courses({ data }: { data: Dashboard }) {
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1>Predmeti</h1>
+					<h1 ref={heading} tabIndex={-1}>Predmeti</h1>
 					<p className="muted">
 						Bodovi iz Merlina, akademska godina {data.year}
 					</p>
@@ -42,10 +43,10 @@ export default function Courses({ data }: { data: Dashboard }) {
 						const pct = coursePercent(c);
 						const sofar = gradedSoFar(c);
 						return (
-							<Glass key={c.key} layout className="course" interactive onClick={() => setOpen(c)} style={{ '--accent': color } as React.CSSProperties}>
+							<Glass key={c.key} layout className="course" hit={{ label: `${shortCourse(c.name)}, ${courseHeadline(c).value}${courseHeadline(c).unit}`, onClick: () => setOpen(c) }} style={{ '--accent': color } as React.CSSProperties}>
 								<div className="course__glow" />
 								<div className="course__top">
-									<Ring value={pct} color={color} size={84} stroke={8} />
+									<Ring value={pct} color={color} size={84} stroke={8} name={shortCourse(c.name)} />
 									<div className="course__name">
 										<span className="course__short">{c.shortname ?? ''}</span>
 										<strong>{shortCourse(c.name)}</strong>
@@ -96,7 +97,7 @@ function CourseDetail({ c, color }: { c: DashCourse; color: string }) {
 	return (
 		<div className="detail">
 			<div className="detail__summary">
-				<Ring value={coursePercent(c)} color={color} size={120} stroke={11} />
+				<Ring value={coursePercent(c)} color={color} size={120} stroke={11} name="Ukupno" />
 				<div className="detail__nums">
 					<div>
 						<span className="muted small">Ukupno</span>
@@ -130,7 +131,7 @@ function CourseDetail({ c, color }: { c: DashCourse; color: string }) {
 									{i.max ? <span className="muted"> / {nfmt(i.max)}</span> : null}
 								</span>
 							</div>
-							<Bar value={i.percent ?? (i.raw !== undefined && i.max ? (i.raw / i.max) * 100 : undefined)} color={color} />
+							<Bar value={i.percent ?? (i.raw !== undefined && i.max ? (i.raw / i.max) * 100 : undefined)} color={color} label={i.name} />
 							<div className="item__meta muted small">
 								{i.weight && <span>Težina {i.weight}</span>}
 								{i.graded_at ? <span>Ocijenjeno {fmtDate(i.graded_at)}</span> : null}

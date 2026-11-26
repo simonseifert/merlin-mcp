@@ -5,7 +5,7 @@ import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
 import { relative } from './format';
-import { spring, useNow } from './components/ui';
+import { requestHeadingFocus, spring, useNow } from './components/ui';
 import Intro, { Wordmark } from './components/brand';
 import Overview from './views/Overview';
 import Courses from './views/Courses';
@@ -53,7 +53,10 @@ export default function App() {
 	const now = useNow(60_000);
 
 	useEffect(() => {
-		const on = () => setRoute(routeFromHash());
+		const on = () => {
+			requestHeadingFocus();
+			setRoute(routeFromHash());
+		};
 		window.addEventListener('hashchange', on);
 		return () => window.removeEventListener('hashchange', on);
 	}, []);
@@ -137,19 +140,19 @@ export default function App() {
 							<div className="topbar__right">
 								{data && <span className="muted small updated">ažurirano {relative(Math.min(data.generated_at, now), now)}</span>}
 								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label="Osvježi" disabled={loading}>
-									<svg width="16" height="16" viewBox="0 0 16 16"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+									<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>
 								{DIRECT && getMerlin() && (
 									<button className="icon-btn" onClick={() => { signOut(); setData(undefined); setAuth('merlin'); }} aria-label="Odjava i brisanje tokena" title="Odjava (briše token iz ovog preglednika)">
-										<svg width="16" height="16" viewBox="0 0 16 16"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 									</button>
 								)}
 							</div>
 						</header>
 
 						<AnimatePresence>
-							{error && (
-								<motion.div className="toast glass" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+							{error && data && (
+								<motion.div className="toast glass" role="alert" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
 									{error}
 									{data ? ' Prikazujem zadnje spremljene podatke.' : ''}
 									<button className="link" onClick={() => load(true)}>Pokušaj ponovo</button>
@@ -160,7 +163,7 @@ export default function App() {
 
 						<main className="main">
 							{!data ? (
-								<Skeleton />
+								loading || !error ? <Skeleton /> : <ErrorState message={error} onRetry={() => load(true)} />
 							) : (
 								<AnimatePresence mode="wait">
 									<motion.div key={route} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.18 } }}>
@@ -177,6 +180,19 @@ export default function App() {
 				)}
 			</div>
 		</MotionConfig>
+	);
+}
+
+/** Shown instead of the skeleton when the first load failed and there is nothing saved to show. */
+function ErrorState({ message, onRetry }: { message: string; onRetry: () => void }) {
+	return (
+		<div className="page">
+			<div className="glass errorstate" role="alert">
+				<h1>Podaci se nisu učitali</h1>
+				<p className="muted">{message}</p>
+				<button className="btn" onClick={onRetry} type="button">Pokušaj ponovo</button>
+			</div>
+		</div>
 	);
 }
 

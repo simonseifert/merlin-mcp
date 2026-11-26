@@ -1,7 +1,7 @@
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import type { Dashboard } from '../types';
-import { CardTitle, Dot, Empty, Glass, KindBadge, listVariants, useNow } from '../components/ui';
+import { CardTitle, Dot, Empty, Glass, KindBadge, listVariants, useNow, usePageHeading } from '../components/ui';
 import { courseColor, fmtDate, fmtTime, relative, shortCourse } from '../format';
 
 const MONTHS = ['sij', 'velj', 'ožu', 'tra', 'svi', 'lip', 'srp', 'kol', 'ruj', 'lis', 'stu', 'pro'];
@@ -13,6 +13,7 @@ function urgency(at: number, now: number): 'hot' | 'warm' | 'calm' {
 
 export default function Exams({ data }: { data: Dashboard }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const [showPast, setShowPast] = useState(false);
 	const names = data.courses.map((c) => c.name);
 	const color = (n?: string) => courseColor(n, names);
@@ -24,7 +25,7 @@ export default function Exams({ data }: { data: Dashboard }) {
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1>Ispiti i seminari</h1>
+					<h1 ref={heading} tabIndex={-1}>Ispiti i seminari</h1>
 					<p className="muted">Ispiti iz Merlin kalendara, seminari iz zadaća i najave profesora</p>
 				</div>
 				<label className="toggle">

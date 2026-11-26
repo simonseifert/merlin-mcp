@@ -1,11 +1,12 @@
 import { motion } from 'motion/react';
 import type { Dashboard } from '../types';
 import type { Route } from '../routes';
-import { Bar, CardTitle, Dot, Empty, Glass, KindBadge, Ring, listVariants, useNow } from '../components/ui';
+import { Bar, CardTitle, Dot, Empty, Glass, KindBadge, Ring, listVariants, useNow, usePageHeading } from '../components/ui';
 import { countdown, courseColor, courseHeadline, coursePercent, dayKey, gradedSoFar, fmtDay, fmtDayLong, fmtTime, greeting, nfmt, plural, relative, shortCourse } from '../format';
 
 export default function Overview({ data, go }: { data: Dashboard; go: (r: Route) => void }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const names = data.courses.map((c) => c.name);
 	const color = (n?: string) => courseColor(n, names);
 	const upcoming = data.events.filter((e) => e.start + (e.duration ?? 0) >= now);
@@ -27,7 +28,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 				<motion.p className="hero__eyebrow" variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
 					{fmtDayLong(now)}
 				</motion.p>
-				<motion.h1 variants={{ hidden: { opacity: 0, y: 16, filter: 'blur(10px)' }, show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } } }}>
+				<motion.h1 ref={heading} tabIndex={-1} variants={{ hidden: { opacity: 0, y: 16, filter: 'blur(10px)' }, show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } } }}>
 					{greeting()}
 					{first ? `, ${first}` : ''}.
 				</motion.h1>
@@ -38,7 +39,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 			</motion.header>
 
 			<div className="grid grid--overview">
-				<Glass className="span-2 next-exam" interactive onClick={() => go('ispiti')} style={nextExam ? ({ '--accent': color(nextExam.course) } as React.CSSProperties) : undefined}>
+				<Glass className="span-2 next-exam" hit={{ label: 'Otvori Ispiti i seminari', href: '#/ispiti', onClick: () => go('ispiti') }} style={nextExam ? ({ '--accent': color(nextExam.course) } as React.CSSProperties) : undefined}>
 					<CardTitle aside={nextExam && <KindBadge kind="exam" />}>Sljedeći ispit</CardTitle>
 					{nextExam ? (
 						<div className="next-exam__body">
@@ -59,10 +60,10 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 					)}
 				</Glass>
 
-				<Glass className="avg" interactive onClick={() => go('predmeti')}>
+				<Glass className="avg" hit={{ label: 'Otvori Predmeti', href: '#/predmeti', onClick: () => go('predmeti') }}>
 					<CardTitle>Uspješnost</CardTitle>
 					<div className="avg__body">
-						<Ring value={avg} size={124} stroke={11} color="#5e5ce6" sub={`od ocijenjenog · ${graded.length} ${plural(graded.length, 'predmet', 'predmeta', 'predmeta')}`} />
+						<Ring value={avg} name="Uspješnost" size={124} stroke={11} color="#5e5ce6" sub={`od ocijenjenog · ${graded.length} ${plural(graded.length, 'predmet', 'predmeta', 'predmeta')}`} />
 					</div>
 				</Glass>
 
@@ -96,7 +97,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 					)}
 				</Glass>
 
-				<Glass className="points" interactive onClick={() => go('predmeti')}>
+				<Glass className="points" hit={{ label: 'Otvori Predmeti', href: '#/predmeti', onClick: () => go('predmeti') }}>
 					<CardTitle>Bodovi</CardTitle>
 					<div className="mini-courses">
 						{[...data.courses].sort((a, b) => (coursePercent(b) ?? -1) - (coursePercent(a) ?? -1)).slice(0, 5).map((c) => (
@@ -105,7 +106,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 									<span className="ellipsis">{shortCourse(c.name)}</span>
 									<span className="num">{courseHeadline(c).value}</span>
 								</div>
-								<Bar value={coursePercent(c)} color={color(c.name)} />
+								<Bar value={coursePercent(c)} color={color(c.name)} label={shortCourse(c.name)} />
 							</div>
 						))}
 						{data.courses.length === 0 && <Empty title="Nema predmeta" />}
@@ -137,7 +138,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 					)}
 				</Glass>
 
-				<Glass className="seminars-mini" interactive onClick={() => go('ispiti')}>
+				<Glass className="seminars-mini" hit={{ label: 'Otvori Ispiti i seminari', href: '#/ispiti', onClick: () => go('ispiti') }}>
 					<CardTitle>Seminari</CardTitle>
 					{seminars.length === 0 ? (
 						<Empty title="Nema seminara" />

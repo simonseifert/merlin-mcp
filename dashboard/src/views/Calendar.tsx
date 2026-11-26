@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useMemo, useState } from 'react';
 import type { Dashboard, DashEvent, EventKind } from '../types';
-import { Dot, Empty, Glass, KindBadge, listVariants, spring, useNow } from '../components/ui';
-import { courseColor, dayKey, fmtDayLong, fmtMonth, fmtTime, shortCourse } from '../format';
+import { Dot, Empty, Glass, KindBadge, listVariants, spring, useNow, usePageHeading } from '../components/ui';
+import { courseColor, dayKey, fmtDayLong, fmtMonth, fmtTime, plural, shortCourse } from '../format';
 
 const WEEKDAYS = ['Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub', 'Ned'];
 const FILTERS: Array<{ id: 'all' | EventKind; label: string }> = [
@@ -18,6 +18,7 @@ const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padSta
 
 export default function Calendar({ data }: { data: Dashboard }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const todayKey = dayKey(now);
 	const [month, setMonth] = useState(() => {
 		const d = new Date();
@@ -64,7 +65,7 @@ export default function Calendar({ data }: { data: Dashboard }) {
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1>Kalendar</h1>
+					<h1 ref={heading} tabIndex={-1}>Kalendar</h1>
 					<p className="muted">Nastava, rokovi i ispiti iz Merlina za sljedeća 4 mjeseca</p>
 				</div>
 				<div className="chips">
@@ -111,7 +112,7 @@ export default function Calendar({ data }: { data: Dashboard }) {
 								const inMonth = d.getMonth() === month.getMonth();
 								const hasExam = evs.some((e) => e.kind === 'exam');
 								return (
-									<button key={k} className={`cell ${inMonth ? '' : 'cell--out'} ${k === todayKey ? 'cell--today' : ''} ${k === selected ? 'cell--sel' : ''} ${hasExam ? 'cell--exam' : ''}`} onClick={() => setSelected(k)}>
+									<button key={k} className={`cell ${inMonth ? '' : 'cell--out'} ${k === todayKey ? 'cell--today' : ''} ${k === selected ? 'cell--sel' : ''} ${hasExam ? 'cell--exam' : ''}`} onClick={() => setSelected(k)} aria-label={`${fmtDayLong(Math.floor(d.getTime() / 1000))}, ${evs.length === 0 ? 'nema događaja' : `${evs.length} ${plural(evs.length, 'događaj', 'događaja', 'događaja')}`}`} aria-pressed={k === selected} aria-current={k === todayKey ? 'date' : undefined}>
 										{k === selected && <motion.span layoutId="cell-sel" className="cell__sel" transition={spring} />}
 										<span className="cell__num">{d.getDate()}</span>
 										<span className="cell__events">
