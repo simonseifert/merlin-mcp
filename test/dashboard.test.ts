@@ -201,6 +201,28 @@ describe('GET /api/dashboard', () => {
 		expect(seen).not.toContain('gradereport_user_get_grade_items');
 	});
 
+	it('never serves one token\'s data to another (caches are keyed by token as well as year)', async () => {
+		vi.stubGlobal(
+			'fetch',
+			vi.fn(async (input: string, init?: RequestInit) => {
+				const params = new URLSearchParams(new URL(input).search);
+				if (init?.body instanceof URLSearchParams) for (const [k, v] of init.body) params.set(k, v);
+				const fn = params.get('wsfunction') ?? '';
+				const who = params.get('wstoken') === 'token-b' ? 'B' : 'A';
+				if (fn === 'core_webservice_get_site_info') return json({ userid: who === 'A' ? 1 : 2, fullname: `Student ${who}` });
+				if (fn === 'core_enrol_get_users_courses') return json([{ id: who === 'A' ? 10 : 20, fullname: `Course of ${who}` }]);
+				return json(merlin(fn));
+			})
+		);
+		const as = async (token: string) =>
+			(await (await worker.fetch(new Request('https://merlin.example/api/dashboard', { headers: { Authorization: 'Bearer the-dashboard-key' } }), { ...ENV, MOODLE_TOKEN: token }, ctx)).json()) as any;
+		const a = await as('token-a');
+		const b = await as('token-b');
+		expect(a.user.fullname).toBe('Student A');
+		expect(b.user.fullname).toBe('Student B');
+		expect(b.courses.map((c: any) => c.name)).toEqual(['Course of B']);
+	});
+
 	it('rejects an unknown part', async () => {
 		expect((await get('/api/dashboard?part=everything', 'the-dashboard-key')).status).toBe(400);
 		expect(seen).toEqual([]);

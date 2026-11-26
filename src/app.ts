@@ -253,21 +253,33 @@ export function __resetCaches(): void {
 const TEN_MIN = 10 * 60_000;
 
 /**
+ * Whose answer a cache entry is: a short, non-reversible tag of the token that fetched it. Cache keys
+ * carry it next to the year, so one isolate can never hand one token's user id, courses or forums to
+ * a call made with another token (MOODLE_TOKENS per year, or any future multi-account use).
+ */
+function owner(env: Env, year?: string): string {
+	const token = tokenForYear(env, year ?? currentYear(env));
+	let h = 2166136261;
+	for (let i = 0; i < token.length; i++) h = Math.imul(h ^ token.charCodeAt(i), 16777619);
+	return (h >>> 0).toString(36);
+}
+
+/**
  * core_webservice_get_site_info, shared for a minute: moodle_whoami and the first getUserId of a
  * request often ask at the same moment (the dashboard does), and one call answers both.
  */
 function getSiteInfo(env: Env, year?: string): Promise<Record<string, unknown>> {
-	return cached(`siteinfo:${year ?? 'default'}`, 60_000, () => moodleCall<Record<string, unknown>>(env, 'core_webservice_get_site_info', {}, year));
+	return cached(`${owner(env, year)}:siteinfo:${year ?? 'default'}`, 60_000, () => moodleCall<Record<string, unknown>>(env, 'core_webservice_get_site_info', {}, year));
 }
 
 async function getUserId(env: Env, year?: string): Promise<number> {
-	return cached(`uid:${year ?? 'default'}`, 60 * 60_000, async () => Number((await getSiteInfo(env, year)).userid));
+	return cached(`${owner(env, year)}:uid:${year ?? 'default'}`, 60 * 60_000, async () => Number((await getSiteInfo(env, year)).userid));
 }
 
 type Course = Record<string, unknown> & { id: number; fullname?: string; shortname?: string };
 
 function getCourses(env: Env, year: string): Promise<Course[]> {
-	return cached(`courses:${year}`, TEN_MIN, async () => {
+	return cached(`${owner(env, year)}:courses:${year}`, TEN_MIN, async () => {
 		const userid = await getUserId(env, year);
 		// returnusercount=0: per Merlin docs the count can add seconds per course.
 		return (await moodleCall<Course[]>(env, 'core_enrol_get_users_courses', { userid, returnusercount: 0 }, year)) ?? [];
@@ -275,7 +287,7 @@ function getCourses(env: Env, year: string): Promise<Course[]> {
 }
 
 function getForums(env: Env, year: string): Promise<Array<Record<string, unknown> & { id: number }>> {
-	return cached(`forumlist:${year}`, TEN_MIN, async () => (await moodleCall<Array<Record<string, unknown> & { id: number }>>(env, 'mod_forum_get_forums_by_courses', {}, year)) ?? []);
+	return cached(`${owner(env, year)}:forumlist:${year}`, TEN_MIN, async () => (await moodleCall<Array<Record<string, unknown> & { id: number }>>(env, 'mod_forum_get_forums_by_courses', {}, year)) ?? []);
 }
 
 function getForumIds(env: Env, year: string): Promise<Set<number>> {
@@ -293,7 +305,7 @@ type Quiz = Record<string, unknown> & { id: number; course: number; coursemodule
 
 /** Every quiz the user can see in a year (settings only; no attempt is started or touched). */
 function getQuizzes(env: Env, year: string): Promise<Quiz[]> {
-	return cached(`quizlist:${year}`, 5 * 60_000, async () => {
+	return cached(`${owner(env, year)}:quizlist:${year}`, 5 * 60_000, async () => {
 		const data = await moodleCall<{ quizzes?: Quiz[] }>(env, 'mod_quiz_get_quizzes_by_courses', {}, year);
 		return data.quizzes ?? [];
 	});
@@ -328,7 +340,7 @@ async function quizInfo(env: Env, year: string, q: Quiz, withAttempts: boolean):
 	};
 	if (withAttempts) {
 		try {
-			const data = await cached(`attempts:${year}:${q.id}`, 60_000, () =>
+			const data = await cached(`${owner(env, year)}:attempts:${year}:${q.id}`, 60_000, () =>
 				moodleCall<{ attempts?: Array<Record<string, unknown>> }>(env, 'mod_quiz_get_user_attempts', { quizid: q.id, status: 'all' }, year)
 			);
 			const attempts = data.attempts ?? [];
@@ -346,7 +358,7 @@ type ModInfo = { name?: string; modname?: string; section?: string; files: Array
 
 /** cmid -> name, type, section and file times for a course, from its content tree (cached). */
 function getModuleIndex(env: Env, year: string, courseId: number): Promise<Map<number, ModInfo>> {
-	return cached(`modidx:${year}:${courseId}`, TEN_MIN, async () => {
+	return cached(`${owner(env, year)}:modidx:${year}:${courseId}`, TEN_MIN, async () => {
 		const raw = await moodleCall<Array<Record<string, unknown>>>(env, 'core_course_get_contents', { courseid: courseId }, year);
 		const idx = new Map<number, ModInfo>();
 		for (const sec of raw ?? []) {

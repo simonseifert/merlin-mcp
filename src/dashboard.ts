@@ -20,7 +20,7 @@
  */
 
 import { z } from 'zod';
-import { allTokens, currentYear, isValidYear, redactSecret } from './lib.js';
+import { allTokens, currentYear, isValidYear, redactSecret, tokenForYear } from './lib.js';
 import { buildAnnouncements, buildGrades, buildMain, configureClassification, type ToolCaller } from './dashboard-build.js';
 
 export * from './dashboard-build.js';
@@ -82,7 +82,11 @@ export async function handleDashboard(request: Request, env: DashEnv, register: 
 	configureClassification({ examWords: env.MERLIN_EXAM_WORDS, seminarWords: env.MERLIN_SEMINAR_WORDS });
 	const part = (url.searchParams.get('part') ?? 'main') as DashboardPart;
 	if (!DASHBOARD_PARTS.includes(part)) return new Response(JSON.stringify({ error: `part must be one of ${DASHBOARD_PARTS.join(', ')}` }), { status: 400, headers });
-	const key = `${part}:${year}`;
+	// Keyed by whose token answers too, so two tokens on one isolate never share a page.
+	const token = tokenForYear(env, year);
+	let h = 2166136261;
+	for (let i = 0; i < token.length; i++) h = Math.imul(h ^ token.charCodeAt(i), 16777619);
+	const key = `${(h >>> 0).toString(36)}:${part}:${year}`;
 	const hit = cache.get(key);
 	let value: Promise<unknown>;
 	if (hit && hit.expires > Date.now() && url.searchParams.get('fresh') !== '1') value = hit.value;
