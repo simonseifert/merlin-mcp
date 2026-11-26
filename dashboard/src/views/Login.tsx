@@ -66,34 +66,26 @@ export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) =
 		void loginWith(token);
 	};
 
-	/** Read the clipboard, find a token, and sign in. `auto` keeps quiet when nothing is there (focus retries). */
-	const fromClipboard = useCallback(
-		async (auto = false) => {
-			if (busyRef.current) return;
-			let text = '';
-			try {
-				text = await navigator.clipboard.readText();
-			} catch {
-				if (!auto) setError('Preglednik ne da pročitati međuspremnik. Zalijepi adresu ručno u polje ispod.');
-				return;
-			}
-			const token = extractToken(text);
-			if (!token) {
-				if (!auto) setError('U međuspremniku nema tokena. Kopiraj adresu koja počinje s merlin-token:// pa pokušaj ponovno.');
-				return;
-			}
-			void loginWith(token);
-		},
-		[loginWith]
-	);
-
-	// Coming back from the SRCE tab with the address copied: try to pick it up automatically.
-	useEffect(() => {
-		if (step !== 'paste') return;
-		const on = () => void fromClipboard(true);
-		window.addEventListener('focus', on);
-		return () => window.removeEventListener('focus', on);
-	}, [step, fromClipboard]);
+	/**
+	 * Read the clipboard, find a token, and sign in. Only ever called from the button: the clipboard
+	 * is never read on its own (on focus, on load), so nothing the student copied for another reason leaves the browser.
+	 */
+	const fromClipboard = useCallback(async () => {
+		if (busyRef.current) return;
+		let text = '';
+		try {
+			text = await navigator.clipboard.readText();
+		} catch {
+			setError('Preglednik ne da pročitati međuspremnik. Zalijepi adresu ručno u polje ispod.');
+			return;
+		}
+		const token = extractToken(text);
+		if (!token) {
+			setError('U međuspremniku nema adrese s tokenom. Kopiraj adresu koja počinje s merlin-token:// pa pokušaj ponovno.');
+			return;
+		}
+		void loginWith(token);
+	}, [loginWith]);
 
 	return (
 		<div className="login">
@@ -128,8 +120,8 @@ export default function Login({ onDone, notice }: { onDone: (s: MerlinSession) =
 					</>
 				) : (
 					<>
-						<p className="small muted login__hint">Prijavio si se? Kopiraj adresu koja počinje <code>merlin-token://</code> i vrati se ovamo — pokušat ću je uzeti sam. Ako ne uspije, klikni gumb ili je zalijepi dolje.</p>
-						<button className="btn btn--block" onClick={() => void fromClipboard(false)} disabled={busy} type="button">
+						<p className="small muted login__hint">Prijavio si se? Kopiraj adresu koja počinje <code>merlin-token://</code>, vrati se ovamo i klikni gumb (čita međuspremnik samo kad klikneš) ili je zalijepi dolje.</p>
+						<button className="btn btn--block" onClick={() => void fromClipboard()} disabled={busy} type="button">
 							{busy ? 'Provjeravam…' : 'Zalijepi iz međuspremnika i prijavi se'}
 						</button>
 						<textarea

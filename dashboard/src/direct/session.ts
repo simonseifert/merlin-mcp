@@ -55,25 +55,32 @@ export function signOut(): void {
 	}
 }
 
-/** 32-hex token, or a `...token=BASE64(sig:::token)` address the launch flow redirects to. */
+/**
+ * A token from what the student pasted: either the whole input is a bare 32-hex token, or it holds an
+ * explicit token address (`...token=BASE64(sig:::token)` or `...token=<hex>`, as the launch flow
+ * redirects to). Nothing else is accepted: no hunting for a 32-hex run in arbitrary text, which would
+ * send unrelated clipboard contents to Merlin.
+ */
 export function extractToken(input: string): string | null {
 	const t = input.trim();
 	if (/^[0-9a-f]{32}$/i.test(t)) return t.toLowerCase();
-	const m = /token=([^&\s]+)/.exec(t);
-	if (m) {
-		const raw = decodeURIComponent(m[1]).trim();
-		if (/^[0-9a-f]{32}$/i.test(raw)) return raw.toLowerCase(); // token=<hex>
-		try {
-			const parts = atob(raw).split(':::'); // token=base64(sig:::token[:::private])
-			const tok = (parts[1] ?? parts[0] ?? '').trim();
-			if (/^[0-9a-f]{32}$/i.test(tok)) return tok.toLowerCase();
-		} catch {
-			/* not base64 */
-		}
+	const m = /(?:^|[^a-z0-9_])token=([^&\s]+)/i.exec(t);
+	if (!m) return null;
+	let raw: string;
+	try {
+		raw = decodeURIComponent(m[1]).trim();
+	} catch {
+		return null;
 	}
-	// last resort: any 32-hex run anywhere in the pasted text
-	const any = /[0-9a-f]{32}/i.exec(t);
-	return any ? any[0].toLowerCase() : null;
+	if (/^[0-9a-f]{32}$/i.test(raw)) return raw.toLowerCase(); // token=<hex>
+	try {
+		const parts = atob(raw).split(':::'); // token=base64(sig:::token[:::private])
+		const tok = (parts[1] ?? parts[0] ?? '').trim();
+		if (/^[0-9a-f]{32}$/i.test(tok)) return tok.toLowerCase();
+	} catch {
+		/* not base64 */
+	}
+	return null;
 }
 
 // Auto-return (desktop): we register a handler for a `web+…` scheme, tell Moodle to redirect the token
