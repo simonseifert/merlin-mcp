@@ -22,5 +22,6 @@ services:
       MOODLE_TOKEN: anything-works-here   # the fake accepts any token
       MCP_BEARER: demo-mcp-bearer
       API_BEARER: demo-api-bearer
+      DASHBOARD_KEY: demo                  # open http://127.0.0.1:8787/dashboard/#key=demo
     ports:
       - "127.0.0.1:8787:8787"             # reachable from this machine only

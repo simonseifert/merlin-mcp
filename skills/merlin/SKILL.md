@@ -14,7 +14,7 @@ Each academic year is a separate Moodle, and ids are only unique within one year
 |---|---|
 | Is the connection working, who am I? | `moodle_whoami` |
 | What courses am I enrolled in? | `moodle_get_courses` |
-| What is due soon? | `moodle_get_upcoming_deadlines` (quiz items include time limit and attempts left) |
+| What is due soon? | `moodle_get_upcoming_deadlines` (quiz items include time limit and attempts left; `quiz_details=false` skips those lookups when only dates matter) |
 | What is on my calendar (classes, exams)? | `moodle_get_calendar_events` |
 | Assignment status, due dates, grader comments | `moodle_get_assignments` |
 | Grades and feedback | `moodle_get_grades` (`course_id` optional; items carry `grademax` and `rangeformatted`) |
@@ -86,3 +86,7 @@ Typical chains:
 ## Owner notes
 
 If a `LOCAL.md` file exists next to this one, read it: it holds the owner's own setup (local archives, scripts). It is not part of the repo.
+
+## Prompts
+
+The server offers four prompts (slash commands in clients that support them): `whats_due` (days), `weekly_digest`, `exam_prep` (course) and `message_teacher` (course, about). They only use the tools above, and `message_teacher` drafts without sending.

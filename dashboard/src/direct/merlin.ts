@@ -15,7 +15,8 @@
 import type { ToolCaller } from '../../../src/dashboard-build';
 import { stripHtml, truncate } from '../../../src/lib';
 
-export const MERLIN_ORIGIN = 'https://moodle.srce.hr';
+/** Merlin itself. A build can point elsewhere (VITE_MERLIN_ORIGIN), for example the fake Merlin in examples/. */
+export const MERLIN_ORIGIN: string = (import.meta as { env?: Record<string, string | undefined> }).env?.VITE_MERLIN_ORIGIN || 'https://moodle.srce.hr';
 
 /** Everything direct mode may ask Merlin. All read-only; nothing here sends, submits or marks read. */
 export const DIRECT_FUNCTIONS: ReadonlySet<string> = new Set([

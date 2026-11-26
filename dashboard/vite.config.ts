@@ -15,7 +15,7 @@ const CSP = [
 	"script-src 'self'",
 	"style-src 'self' 'unsafe-inline'",
 	"img-src 'self' data: blob:",
-	"connect-src 'self' https://moodle.srce.hr",
+	`connect-src 'self' ${process.env.VITE_MERLIN_ORIGIN || 'https://moodle.srce.hr'}`,
 	"object-src 'none'",
 	"base-uri 'none'",
 	"form-action 'none'",

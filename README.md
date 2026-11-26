@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/simonseifert/merlin-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/simonseifert/merlin-mcp/actions/workflows/ci.yml) [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE) [![MCP](https://img.shields.io/badge/MCP-Streamable%20HTTP-7c3aed.svg)](https://modelcontextprotocol.io)
 
-**TL;DR:** A read-only bridge from your own [Merlin](https://moodle.srce.hr) account (SRCE's Moodle for Croatian universities, Moodle 5.2) to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Cloudflare Worker or self-hosted on Node or Docker, from the same code. It serves MCP on `/mcp` and a few bearer-gated REST routes for automation. It never writes to Merlin, with one optional, gated exception: private messages, which go out only after you tap **Send** on your phone. Two reads leave the same traces a browser would: opening a forum thread marks it read, and asking `moodle_get_assignments` for feedback logs a "feedback viewed" event your teachers can see (off by default). One server holds one person's token; don't host other people's.
+**TL;DR:** A read-only bridge from your own [Merlin](https://moodle.srce.hr) account (SRCE's Moodle for Croatian universities, Moodle 5.2) to AI agents over the [Model Context Protocol](https://modelcontextprotocol.io). It runs as a Cloudflare Worker or self-hosted on Node or Docker, from the same code. It serves MCP on `/mcp` and a few bearer-gated REST routes for automation. It never writes to Merlin, with one optional, gated exception: private messages, which go out only after you tap **Send** on your phone. Two reads leave the same traces a browser would: opening a forum thread marks it read, and asking `moodle_get_assignments` for feedback logs a "feedback viewed" event your teachers can see (off by default). There is also a web dashboard (points, calendar, exams, announcements), including a version classmates can sign into with their own account ([DASHBOARD.md](DASHBOARD.md)). One server holds one person's token; don't host other people's.
 
 > Unofficial. Not affiliated with or endorsed by SRCE or any university. Use it only with your own account, follow your institution's rules (AAI@EduHr included), and keep the call volume low. See [SECURITY.md](SECURITY.md) for the security model.
 
@@ -23,6 +23,75 @@ flowchart LR
 - **Every active academic year at once.** Merlin runs one Moodle site per academic year (`https://moodle.srce.hr/<start>-<end>`), each with its own database, so ids are only unique within a year. The server reads the current year (rolls over on 1 October, Europe/Zagreb) plus the previous one, plus next year from 1 September once its site answers. `MERLIN_YEARS="2025-2026,2026-2027"` overrides the list and `MOODLE_URL` pins one year.
 - **Polite by design.** An honest `User-Agent` (add your contact with `MOODLE_CONTACT`), the token in a POST body rather than the URL, at most 120 Moodle calls a minute per server process (file downloads included), and a pause for `Retry-After` when Merlin answers 429 or 503.
 - **Code layout:** `src/app.ts` is the platform-neutral core (routes, auth, MCP tools, Moodle client). `src/index.ts` is the Cloudflare entry, `src/node.ts` the Node entry (HTTP or stdio), `src/approvals.ts` the pending-send store, `src/lib.ts` the pure helpers (years, auth compare, the allow-list, redaction, HTML stripping). Tests are in `test/`, an agent skill in `skills/merlin/`, client snippets in [CLIENTS.md](CLIENTS.md).
+
+## Getting your token
+
+The server needs a Moodle web-service token for your account. On Merlin you sign in through AAI@EduHr, so `login/token.php` with a password doesn't work. Use the mobile-app sign-in that Moodle documents (`admin/tool/mobile/launch.php`, [source](https://github.com/moodle/moodle/blob/v5.2.2/public/admin/tool/mobile/launch.php)), the same flow the MerlinMobile app uses. You sign in yourself, in your own browser; nothing here sees your AAI password.
+
+1. **Make the link.** `node scripts/get-token.mjs link --year 2026-2027` (use the academic year you need). It prints a `launch.php` link.
+2. **Open it and sign in.** In Firefox, open DevTools first (F12, Network tab, tick "Persist logs"); in Chrome, tick "Preserve log". Open the link and sign in with AAI@EduHr if asked.
+3. **Copy the answer.** At the end Moodle redirects to an address starting `merlin-token://token=` (it may use another name, such as `moodlemobile://`, if the site forces one). The browser can't open it: Firefox shows it in an error page, otherwise find the `launch.php` request in the Network tab and copy its `Location` header.
+4. **Save it.** `node scripts/get-token.mjs save '<that whole address>' --year 2026-2027`. It checks the answer matches your link and writes `MOODLE_TOKEN` into `merlin.env` (readable only by you, and gitignored). It never prints the token unless you add `--print`, and it drops the second "private token" Moodle sends along.
+5. **Check it.** Start the server and call `moodle_whoami`: it should show your name for every year you use.
+
+| Problem | What to do |
+|---|---|
+| No `...token=` address appears anywhere | Log in to Merlin in that browser first, then open the link again in the same browser. |
+| "Warning: this answer does not match the last link" | You copied an answer from an older link or another year. Make a new link and repeat. |
+| `invalidtoken` later | The token expired or was reset. Repeat these steps. |
+| Works for one year only | Make a token per year and set `MOODLE_TOKENS` (see "Multiple years"). |
+
+Things to know:
+
+- **It's the same token the official app uses.** Moodle hands back your existing token, so every client shares one. If it's ever reset, all of them stop working at once.
+- **Treat it like a password.** Students usually can't revoke their own token on Merlin, so a leaked one stays valid until it expires or SRCE revokes it. Never commit it, paste it in chats, or put it in a shared server.
+- **It expires.** Moodle's default lifetime is 12 weeks (sites can change it). An `invalidtoken` error means you need a fresh one.
+
+## Run it
+
+**Cloudflare Worker**
+
+```bash
+npm install
+npm run typecheck && npm test
+npx wrangler secret put MOODLE_TOKEN      # and MCP_BEARER, API_BEARER; optionally RELAY_BEARER, MOODLE_CONTACT, MOODLE_TOKENS, DASHBOARD_KEY
+npm run deploy                             # builds the dashboard, then wrangler deploy
+```
+
+Make bearers with `openssl rand -hex 32`. `npm run dev` runs it locally from a gitignored `.dev.vars`.
+
+**Node or Docker** (needs Node 22.13+). Configuration is environment variables with the same names (see "Configuration" below and `merlin.env.example`). Pending sends live in SQLite (`MERLIN_DB`, default `./merlin.sqlite`).
+
+```bash
+npm ci && npm run build:node
+MOODLE_TOKEN=... MCP_BEARER=... API_BEARER=... node dist/node.js   # HTTP on :8787
+MOODLE_TOKEN=... node dist/node.js --stdio                          # one local client, read-only
+
+docker build -t merlin-mcp .
+docker run --env-file merlin.env -p 8787:8787 -v merlin-data:/data merlin-mcp
+```
+
+- **stdio is always read-only:** it never offers `moodle_send_message` and creates no database file.
+- **Listening address:** the Node server listens on `127.0.0.1` only unless you set `HOST` (the Docker image sets `HOST=0.0.0.0`). `GET /healthz` answers without auth and without calling Moodle, for health checks.
+- **Reachability:** a server on your LAN or tailnet works for CLI agents. claude.ai and ChatGPT connect from their own clouds and need a public HTTPS URL plus OAuth, which this server doesn't have yet. Set `MERLIN_PUBLIC_URL` (for example behind a reverse proxy) so approval links use your public address; without it they point at `localhost`, never at whatever Host header a request carries.
+
+After a deploy, check: `moodle_whoami` answers for each year, `tools/list` returns the tools, and `/api/call?wsfunction=core_webservice_get_site_info` works with the API bearer and fails (401) with the MCP bearer.
+
+## Connecting a client
+
+Snippets for Claude Code, Claude Desktop, Codex, Gemini CLI, Cursor, VS Code, Windsurf, LM Studio, Hermes, OpenClaw, n8n and stdio are in [CLIENTS.md](CLIENTS.md). The server tells every client its rules on connect (MCP instructions) and offers four prompts, which show up as slash commands: `whats_due`, `weekly_digest`, `exam_prep` and `message_teacher` (drafts only). Load the agent skill in [skills/merlin/](skills/merlin/SKILL.md) alongside, so the agent knows which tool answers what and the safety rules.
+
+For Claude Code, keep the bearer out of `~/.claude.json` with a `headersHelper` that reads it from a mode-600 file:
+
+```json
+"merlin": {
+  "type": "http",
+  "url": "https://<your-worker>.workers.dev/mcp",
+  "headersHelper": "/path/to/print-merlin-header.sh"
+}
+```
+
+where the script prints `{"Authorization": "Bearer <MCP_BEARER>"}`.
 
 ## MCP tools
 
@@ -110,6 +179,10 @@ On Workers set these as `wrangler secret put` (they contain secrets: the topic a
 - `GET /api/approve/<id>?k=<key>`, `GET /api/reject/<id>?k=<key>`: no bearer. An HTML confirm page with one `POST` button; changes nothing. 404 for an unknown id or wrong key.
 - `POST /api/approve/<id>?k=<key>`, `POST /api/reject/<id>?k=<key>`: no bearer. 200 with what happened, or 404, 409, 410, 429. These and `/api/pending` send `Cache-Control: no-store` and `Referrer-Policy: no-referrer`; the confirm page also sets a strict `Content-Security-Policy` and `X-Frame-Options: DENY`.
 
+## Web dashboard
+
+A read-only page with your points, a calendar, exams, seminars and announcements, served at `/dashboard/` (`npm run dashboard` locally, `DASHBOARD_KEY` on a public server), plus a **direct** build that classmates can sign into with their own Merlin account, with no server holding their tokens. Everything about it is in [DASHBOARD.md](DASHBOARD.md).
+
 ## Building on it
 
 The REST side is meant for your own scripts, so you can build things the tools don't cover. Everything goes through `/api/call` with `API_BEARER`, and stays read-only.
@@ -121,96 +194,31 @@ The REST side is meant for your own scripts, so you can build things the tools d
 
 To try any of it without a Merlin account, [examples/](examples/README.md) has a fake Merlin with invented data.
 
-## Web dashboard
+## Configuration
 
-The dashboard is branded **Marlon** (name and logo); it still reads from **Merlin** (SRCE's Moodle), and the server, package and `moodle_*` tools keep the Merlin name. A read-only page at `/dashboard/`: points per course (with every graded item, its range, weight and the teacher's comment), a month calendar, exams, seminars and project deadlines, and teachers' announcements. Frosted-glass UI with a three.js backdrop that changes with the page; follows the system's light or dark theme (`?theme=light` or `?theme=dark` pins it), and skips the 3D layer for `prefers-reduced-motion` or without WebGL. `?demo` shows it with invented data and no server calls.
+Environment variables (Worker secrets or vars on Cloudflare, `merlin.env` on Node and Docker). Only `MOODLE_TOKEN` and `MCP_BEARER` are required.
 
-- **On your own machine:** `npm run dashboard` (builds, then runs the Node server with `merlin.env`) and open `http://localhost:8787/dashboard/`. A Node server listening only on loopback (the default `HOST`) and not behind a proxy (`MERLIN_PUBLIC_URL` unset) serves the dashboard with no key, since nothing else can reach it, as long as the request is addressed to `localhost`, `127.0.0.1` or `[::1]` (so another website cannot reach it by pointing its own domain at your machine); `DASHBOARD_OPEN=0` turns that off. It opens `/api/dashboard` only, every other route still needs its bearer.
-- **On a public server (Workers, Docker):** pick a long random `DASHBOARD_KEY` (`wrangler secret put DASHBOARD_KEY`, or in `merlin.env`), build with `npm run build:dashboard` (`npm run deploy` does it for you), and open `https://<your-server>/dashboard/#key=<DASHBOARD_KEY>` once. The page keeps the key in that browser's local storage and removes it from the address bar; it never travels in a URL the server sees. A wrong or rotated key sends you back to the start screen.
-- **What the key can do:** `DASHBOARD_KEY` opens `GET /api/dashboard` and nothing else: not `/mcp`, not `/api/call`, not files, not sends. Anyone holding it can read your points, calendar and announcements, so treat the link like a password.
-- **Where the data comes from:** `GET /api/dashboard` runs the MCP tools in-process, in three parts the page asks for side by side and merges. `part=main` (the default): `moodle_whoami`, `moodle_get_courses`, `moodle_get_calendar_events` and `moodle_get_upcoming_deadlines` for 120 days (without quiz details), and `moodle_get_assignments` without feedback; about 5 Merlin calls. `part=grades`: `moodle_get_grades`, one call per course. `part=announcements`: `moodle_get_new_forum_posts` for 45 days, announcement forums only, one call for the forum list plus one per forum. Each part is cached per isolate or process (main 5 minutes, announcements 10, grades 15), and the browser keeps the last answer so a reopened page shows at once while it refreshes; `fresh=1` (the refresh button) skips the server cache. Everything is read for the current year only (`year=` for another). It never logs a "feedback viewed" event and never marks a forum post read. A part that fails is listed in `errors` and the rest still shows.
-- **Exams and seminars are guessed from names:** Merlin has no "exam" type. Events whose name says ispit, kolokvij, međuispit, završni, pismeni, usmeni, parcijalni or test count as exams; seminar, esej, prezentacija, referat, projekt or case study as seminars (`classifyItem` in `src/dashboard.ts`). An exam a teacher never put in the Merlin calendar won't appear.
-- **Workers free plan:** each part is its own request, so each gets its own budget of 50 outgoing requests. The biggest is `part=grades` at one call per course (capped at 40); the other two stay well under.
-- **Develop:** `cd dashboard && npm ci && npm run dev` serves the page with hot reload on :5173 and proxies `/api` to a local merlin-mcp on :8787 (try it with `examples/fake-moodle.mjs` and `DASHBOARD_KEY=demo`, then open `http://localhost:5173/dashboard/#key=demo`). The code is React, three.js (`@react-three/fiber`, `drei`) and Motion; the 3D scene is its own lazily loaded chunk.
-
-## Dashboard for classmates (direct mode)
-
-A second build of the same dashboard that anyone can host as a plain static site for their classmates. Each student signs in with their **own** Merlin account, and their browser talks to Merlin itself (Merlin's web-service endpoint allows that from any page). No server sees, holds or forwards anyone's token; the host only serves HTML and JavaScript. The sign-in flow is by leonkreso784-bit (PR #12).
-
-- **Build:** `cd dashboard && npm ci && npm run build:direct`, then put `dashboard/dist-direct/` on any static host (Cloudflare Pages, Netlify, Vercel, GitHub Pages). `MARLON_BASE=/some/path/` if it is not served at the root. `npm run dev:direct` runs it locally with hot reload.
-- **Signing in:** the student picks the academic year and signs in on SRCE's own AAI@EduHr page through the official app flow (`launch.php`, the same as `scripts/get-token.mjs`); the password is only ever typed there. The token comes back on a `merlin-token://` address. On desktop the page offers to handle a `web+marlon://` link so it returns by itself; otherwise the student copies that address and the page reads it from the clipboard (or it is pasted). The token is kept in that browser's local storage only; the sign-out button removes it and every saved page.
-- **What it can do:** the browser client (`dashboard/src/direct/merlin.ts`) calls eight read-only functions and refuses anything else in code: no sends, no submissions, no assignment feedback (a teacher-visible event), no opening forum threads (marks them read). The page builds the same three parts as `/api/dashboard`, with the same code (`src/dashboard-build.ts`).
-- **Gentle on Merlin:** at most 4 calls at once and 120 a minute, a pause when Merlin answers 429 or 503, and each part saved in the browser for 5, 15 or 10 minutes. One full load is about 8 calls plus one per course and one per announcement forum, close to what the official app does.
-- **The token can do more than the page does.** The app sign-in hands out a mobile-app token, which Merlin also accepts for sending messages and submitting work. The page never uses it that way, but anything that could run script in the page could. So the build ships a strict Content-Security-Policy (`connect-src 'self' https://moodle.srce.hr`, scripts only from the site itself, no framing via `_headers` where the host supports it), loads nothing from other sites, and the token never goes into a URL or a log. Host it only from a repo you control, and tell your classmates what it is: a page that reads their Merlin from their own browser.
-
-## Getting your token
-
-The server needs a Moodle web-service token for your account. On Merlin you sign in through AAI@EduHr, so `login/token.php` with a password doesn't work. Use the mobile-app sign-in that Moodle documents (`admin/tool/mobile/launch.php`, [source](https://github.com/moodle/moodle/blob/v5.2.2/public/admin/tool/mobile/launch.php)), the same flow the MerlinMobile app uses. You sign in yourself, in your own browser; nothing here sees your AAI password.
-
-1. **Make the link.** `node scripts/get-token.mjs link --year 2026-2027` (use the academic year you need). It prints a `launch.php` link.
-2. **Open it and sign in.** In Firefox, open DevTools first (F12, Network tab, tick "Persist logs"); in Chrome, tick "Preserve log". Open the link and sign in with AAI@EduHr if asked.
-3. **Copy the answer.** At the end Moodle redirects to an address starting `merlin-token://token=` (it may use another name, such as `moodlemobile://`, if the site forces one). The browser can't open it: Firefox shows it in an error page, otherwise find the `launch.php` request in the Network tab and copy its `Location` header.
-4. **Save it.** `node scripts/get-token.mjs save '<that whole address>' --year 2026-2027`. It checks the answer matches your link and writes `MOODLE_TOKEN` into `merlin.env` (readable only by you, and gitignored). It never prints the token unless you add `--print`, and it drops the second "private token" Moodle sends along.
-5. **Check it.** Start the server and call `moodle_whoami`: it should show your name for every year you use.
-
-| Problem | What to do |
+| Variable | What it does |
 |---|---|
-| No `...token=` address appears anywhere | Log in to Merlin in that browser first, then open the link again in the same browser. |
-| "Warning: this answer does not match the last link" | You copied an answer from an older link or another year. Make a new link and repeat. |
-| `invalidtoken` later | The token expired or was reset. Repeat these steps. |
-| Works for one year only | Make a token per year and set `MOODLE_TOKENS` (see "Multiple years"). |
-
-Things to know:
-
-- **It's the same token the official app uses.** Moodle hands back your existing token, so every client shares one. If it's ever reset, all of them stop working at once.
-- **Treat it like a password.** Students usually can't revoke their own token on Merlin, so a leaked one stays valid until it expires or SRCE revokes it. Never commit it, paste it in chats, or put it in a shared server.
-- **It expires.** Moodle's default lifetime is 12 weeks (sites can change it). An `invalidtoken` error means you need a fresh one.
-
-## Run it
-
-**Cloudflare Worker**
-
-```bash
-npm install
-npm run typecheck && npm test
-npx wrangler secret put MOODLE_TOKEN      # and MCP_BEARER, API_BEARER; optionally RELAY_BEARER, MOODLE_CONTACT, MOODLE_TOKENS
-npx wrangler deploy
-```
-
-Make bearers with `openssl rand -hex 32`. `npm run dev` runs it locally from a gitignored `.dev.vars`.
-
-**Node or Docker** (needs Node 22.13+). Configuration is environment variables with the same names (`merlin.env.example`). Pending sends live in SQLite (`MERLIN_DB`, default `./merlin.sqlite`).
-
-```bash
-npm ci && npm run build:node
-MOODLE_TOKEN=... MCP_BEARER=... API_BEARER=... node dist/node.js   # HTTP on :8787
-MOODLE_TOKEN=... node dist/node.js --stdio                          # one local client, read-only
-
-docker build -t merlin-mcp .
-docker run --env-file merlin.env -p 8787:8787 -v merlin-data:/data merlin-mcp
-```
-
-- **stdio is always read-only:** it never offers `moodle_send_message` and creates no database file.
-- **Listening address:** the Node server listens on `127.0.0.1` only unless you set `HOST` (the Docker image sets `HOST=0.0.0.0`). `GET /healthz` answers without auth and without calling Moodle, for health checks.
-- **Reachability:** a server on your LAN or tailnet works for CLI agents. claude.ai and ChatGPT connect from their own clouds and need a public HTTPS URL plus OAuth, which this server doesn't have yet. Set `MERLIN_PUBLIC_URL` (for example behind a reverse proxy) so approval links use your public address; without it they point at `localhost`, never at whatever Host header a request carries.
-
-After a deploy, check: `moodle_whoami` answers for each year, `tools/list` returns the tools, and `/api/call?wsfunction=core_webservice_get_site_info` works with the API bearer and fails (401) with the MCP bearer.
-
-## Connecting a client
-
-Snippets for Claude Code, Codex, Gemini CLI, Cursor, Hermes, OpenClaw, n8n and stdio are in [CLIENTS.md](CLIENTS.md). Load the agent skill in [skills/merlin/](skills/merlin/SKILL.md) alongside, so the agent knows which tool answers what and the safety rules.
-
-For Claude Code, keep the bearer out of `~/.claude.json` with a `headersHelper` that reads it from a mode-600 file:
-
-```json
-"merlin": {
-  "type": "http",
-  "url": "https://<your-worker>.workers.dev/mcp",
-  "headersHelper": "/path/to/print-merlin-header.sh"
-}
-```
-
-where the script prints `{"Authorization": "Bearer <MCP_BEARER>"}`.
+| `MOODLE_TOKEN` | Your Merlin token (see "Getting your token"). |
+| `MOODLE_TOKENS` | JSON map of year to token, when years need different tokens (`{"2025-2026":"...","2026-2027":"..."}`). |
+| `MERLIN_YEARS` | Comma-separated years to read instead of the automatic current plus previous. |
+| `MOODLE_URL` | Pin one site, for example `https://moodle.srce.hr/2026-2027`. |
+| `MOODLE_BASE` | Base of the per-year sites (default `https://moodle.srce.hr`). |
+| `MOODLE_CONTACT` | Your e-mail in the User-Agent, so Merlin's admins can reach you. |
+| `MCP_BEARER` | Opens `/mcp`. |
+| `API_BEARER` | Opens `/api/*` (`/api/call`, `/api/file`, `/api/notifications`). |
+| `LEGACY_API_BEARER` | `1` lets `MCP_BEARER` open `/api/*` too, for old single-bearer setups. |
+| `RELAY_BEARER` | Opens only `/api/pending`, for your own approval relay. |
+| `NOTIFY_NTFY_URL`, `NOTIFY_NTFY_TOKEN` | Built-in phone approval through ntfy (the URL is a secret). |
+| `NOTIFY_WEBHOOK_URL`, `NOTIFY_WEBHOOK_FORMAT` | Built-in phone approval through a webhook (`discord` or `json`). |
+| `MERLIN_ENABLE_SEND` | `0` leaves the send tool out entirely. |
+| `DASHBOARD_KEY` | Opens the web dashboard's data route and nothing else. |
+| `DASHBOARD_OPEN` | Node only: `0` turns off the key-less dashboard on a loopback-only server. |
+| `MERLIN_EXAM_WORDS`, `MERLIN_SEMINAR_WORDS` | Your faculty's extra words for exams and seminars on the dashboard, comma separated. |
+| `MERLIN_PUBLIC_URL` | Node behind a reverse proxy: the public address for approval links. |
+| `MERLIN_DB` | Node: SQLite file for pending sends (default `./merlin.sqlite`). |
+| `HOST`, `PORT` | Node: listening address (default `127.0.0.1:8787`; the Docker image uses `0.0.0.0`). |
 
 ## Notes
 

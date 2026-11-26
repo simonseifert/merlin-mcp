@@ -2,10 +2,24 @@
 
 ## Unreleased
 
-- Web dashboard at `/dashboard/` (folder `dashboard/`): points per course with item detail, a month calendar, exams, seminars and announcements, in a frosted-glass UI over a three.js scene. Served as Workers static assets, or by the Node server from `dashboard/dist`; the Docker image builds it.
-- `GET /api/dashboard` in three parts (`part=main`, `grades`, `announcements`), each its own request with its own Workers call budget, cached 5, 15 and 10 minutes. The page loads them side by side and shows each as it lands, starting from the copy it saved last time. Opened by a new optional secret, `DASHBOARD_KEY`, which opens nothing else (`API_BEARER` also works). The dashboard always reads the server's own token: one server, one person's Merlin.
-- Direct mode for the dashboard (`npm run build:direct`): a static site where each student signs in with their own Merlin account (SRCE app sign-in, Leon's flow) and the browser calls Merlin itself, so no server holds anyone's token. Read-only client with an eight-function allow-list, a call brake, per-part browser cache and a strict CSP. The folding code moved to `src/dashboard-build.ts`, shared by server and browser.
-- `moodle_get_upcoming_deadlines` takes `quiz_details` (default `true`); `false` skips the quiz settings and attempt lookups. `moodle_whoami` and the first user-id lookup of a request now share one `core_webservice_get_site_info` call (cached for a minute).
+**Web dashboard ("Marlon", by leonkreso784-bit, PR #12).** See DASHBOARD.md.
+- A read-only page at `/dashboard/`: points per course with item detail, a month calendar, exams, seminars and teachers' announcements, frosted glass over a three.js scene, `?demo` with invented data. Served as Workers static assets, by the Node server, and in the Docker image. `npm run dashboard` runs it locally; `npm run deploy` builds it before deploying.
+- `GET /api/dashboard` in three parts (`part=main`, `grades`, `announcements`), each its own request with its own Workers call budget, cached 5, 15 and 10 minutes. The page loads them side by side, shows each as it lands, and starts from its last saved copy.
+- Opened by a new optional secret, `DASHBOARD_KEY`, which opens nothing else (`API_BEARER` also works). A loopback-only Node server serves it without a key, but only to requests addressed to loopback (a check against DNS rebinding); `DASHBOARD_OPEN=0` turns that off.
+- Exams and seminars are recognised by word starts (no more "Ispitivanje softvera" as an exam or "Projektni menadžment" as a seminar; "Test" is an exam only when it is not a Moodle quiz). `MERLIN_EXAM_WORDS` and `MERLIN_SEMINAR_WORDS` add a faculty's own words. The calendar includes the last 14 days.
+
+**Direct mode (PR #13).** `npm --prefix dashboard run build:direct` makes a static site where each student signs in with their own Merlin account (SRCE's app sign-in) and the browser reads Merlin itself, so no server holds anyone's token. Read-only client with an eight-function allow-list, a call brake and a strict Content-Security-Policy. A token in the address bar is accepted only after a sign-in that browser started.
+
+**For agents.**
+- The server sends MCP instructions on connect (the core rules of the `merlin` skill), every tool has a title, and four prompts show up as slash commands: `whats_due`, `weekly_digest`, `exam_prep`, `message_teacher` (drafts only).
+- `moodle_get_upcoming_deadlines` takes `quiz_details` (default `true`); `moodle_get_calendar_events` takes `days_back`.
+- CLIENTS.md covers Claude Desktop, VS Code, Windsurf and LM Studio.
+
+**Under the hood.**
+- Every cache entry is keyed by a hash of the token as well as the year. `moodle_whoami` and the first user-id lookup share one site-info call.
+- The dashboard's data code lives in `src/dashboard-build.ts`, shared by the server and the direct build.
+- CI builds and typechecks both dashboard builds and the Docker image. `test/docs.test.ts` keeps README, SECURITY.md, `merlin.env.example`, the version and this changelog in step with the code.
+- README reordered (token, run, clients first) with a Configuration table; SECURITY.md covers the dashboard and direct mode; CONTRIBUTING has a release checklist; PR and feature-request templates.
 
 ## 0.6.2 (2026-11-23)
 

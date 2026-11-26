@@ -1,6 +1,6 @@
 # Connecting clients to merlin-mcp
 
-**TL;DR:** Every CLI or self-hosted client connects to `https://<your-worker>/mcp` (Streamable HTTP) with the header `Authorization: Bearer $MERLIN_MCP_BEARER`. Snippets below for Claude Code, Codex CLI, Gemini CLI, Cursor, Hermes Agent, OpenClaw and n8n. Install the `merlin` skill (`skills/merlin/`) next to the connection so the agent knows which tool to use and the safety rules. claude.ai and ChatGPT web connectors will NOT work yet: they need OAuth, which this server does not have.
+**TL;DR:** Every CLI or self-hosted client connects to `https://<your-worker>/mcp` (Streamable HTTP) with the header `Authorization: Bearer $MERLIN_MCP_BEARER`. Snippets below for Claude Code, Claude Desktop, Codex CLI, Gemini CLI, Cursor, VS Code, Windsurf, LM Studio, Hermes Agent, OpenClaw and n8n. Install the `merlin` skill (`skills/merlin/`) next to the connection so the agent knows which tool to use and the safety rules. claude.ai and ChatGPT web connectors will NOT work yet: they need OAuth, which this server does not have.
 
 Conventions: replace `<your-worker>` with your worker host (for example `merlin-mcp.<subdomain>.workers.dev`). Keep the bearer in an environment variable named `MERLIN_MCP_BEARER` and never commit its value. Only the MCP bearer opens `/mcp`; the API bearer is rejected there.
 
@@ -23,7 +23,37 @@ Now printing the config, or an agent reading it, shows no secret. Alternatives:
 - In a project `.mcp.json`, Claude Code expands variables in `url` and `headers`: `"headers": { "Authorization": "Bearer ${MERLIN_MCP_BEARER}" }`. The variable must be set in the environment Claude Code starts in.
 - `claude mcp add --transport http merlin https://<your-worker>/mcp --header "Authorization: Bearer $MERLIN_MCP_BEARER"` works, but the shell expands the variable, so the literal value ends up in `~/.claude.json`.
 
-Check with `claude mcp list`. The 15 read tools are annotated `readOnlyHint: true`; `moodle_send_message` is not, so Claude Code keeps asking before it.
+Check with `claude mcp list`. The 23 read tools are annotated `readOnlyHint: true`; `moodle_send_message` is not, so Claude Code keeps asking before it.
+
+The server also sends instructions (the core rules of the `merlin` skill) and four prompts, which show up as slash commands: `/mcp__merlin__whats_due`, `weekly_digest`, `exam_prep` and `message_teacher`. They work in every client that supports MCP prompts.
+
+## Claude Desktop
+
+Claude Desktop starts local servers as a command, so the simplest setup is the stdio build on your own computer (see "Self-hosted over stdio" below; no bearer needed). In Settings, Developer, Edit Config (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "merlin": {
+      "command": "node",
+      "args": ["/path/to/merlin-mcp/dist/node.js", "--stdio"],
+      "env": { "MOODLE_TOKEN": "<your Merlin token>" }
+    }
+  }
+}
+```
+
+To use your deployed Worker instead, bridge it with `mcp-remote` (needs Node; unverified on Windows):
+
+```json
+"merlin": {
+  "command": "npx",
+  "args": ["-y", "mcp-remote", "https://<your-worker>/mcp", "--header", "Authorization:${MERLIN_AUTH}"],
+  "env": { "MERLIN_AUTH": "Bearer <MCP_BEARER>" }
+}
+```
+
+Restart Claude Desktop. The prompts appear under the "+" menu, and the tools under the tools icon.
 
 ## Codex CLI
 
@@ -73,6 +103,42 @@ The variable must be set in the environment Codex starts in. Don't set `default_
   }
 }
 ```
+
+## VS Code (GitHub Copilot agent mode)
+
+`.vscode/mcp.json` in a workspace, or "MCP: Open User Configuration". The `inputs` entry asks for the bearer once and VS Code stores it encrypted (unverified against the newest VS Code):
+
+```json
+{
+  "inputs": [{ "type": "promptString", "id": "merlin-bearer", "description": "merlin-mcp bearer", "password": true }],
+  "servers": {
+    "merlin": {
+      "type": "http",
+      "url": "https://<your-worker>/mcp",
+      "headers": { "Authorization": "Bearer ${input:merlin-bearer}" }
+    }
+  }
+}
+```
+
+## Windsurf
+
+`~/.codeium/windsurf/mcp_config.json` (unverified):
+
+```json
+{
+  "mcpServers": {
+    "merlin": {
+      "serverUrl": "https://<your-worker>/mcp",
+      "headers": { "Authorization": "Bearer ${env:MERLIN_MCP_BEARER}" }
+    }
+  }
+}
+```
+
+## LM Studio and other local-model apps
+
+LM Studio (Program, Install, Edit `mcp.json`) uses the same `mcpServers` shape as Cursor: either the `url` + `headers` form above or the stdio `command` form from Claude Desktop (unverified). With a local model, keep the tool list short: small models pick tools better when you ask for one thing at a time, and the server instructions help.
 
 ## Hermes Agent
 
@@ -143,7 +209,9 @@ mkdir -p ~/.claude/skills && ln -s "$(pwd)/skills/merlin" ~/.claude/skills/merli
 
 ## Not supported yet: claude.ai and ChatGPT web connectors
 
-Custom connectors in claude.ai (web and mobile) and ChatGPT developer mode call the server from Anthropic's or OpenAI's cloud and need OAuth (or no auth). This server only accepts the static bearer, so they cannot connect. Adding OAuth is scoped in `research-2026-10-23-selfhost-compat.md` (about half a day to a day on Workers). claude.ai has a beta static-header option for some organizations, availability (unverified) for personal accounts.
+Custom connectors in claude.ai (web and mobile) and ChatGPT developer mode call the server from Anthropic's or OpenAI's cloud and need OAuth (or no auth). This server only accepts the static bearer, so they cannot connect. OAuth is planned but not built: done properly it means the server stores each user's Merlin token, which changes the "one server, one person" model, so it needs its own design and review. claude.ai has a beta static-header option for some organizations; availability for personal accounts is unverified.
+
+Until then, on a phone: the dashboard (see [DASHBOARD.md](DASHBOARD.md)) works in any browser, and Claude Desktop or Claude Code on a computer can use the tools.
 
 ## Self-hosted over stdio (no network, no bearer)
 

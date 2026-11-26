@@ -31,6 +31,12 @@ node examples/ask.mjs moodle_get_courses     # any tool; JSON arguments as a sec
 
 Point a real MCP client at `http://127.0.0.1:8787/mcp` with the header `Authorization: Bearer demo-mcp-bearer` (see [CLIENTS.md](../CLIENTS.md)).
 
+## The dashboard
+
+- **Server build:** add `DASHBOARD_KEY=demo` to the `node dist/node.js` line (the Docker Compose file already has it), run `npm run build:dashboard` once, and open `http://127.0.0.1:8787/dashboard/#key=demo`. On a loopback-only Node server it also opens without the key.
+- **Direct build** (each student signs in with their own token): build it against the fake with `cd dashboard && VITE_MERLIN_ORIGIN=http://127.0.0.1:8790 npm run build:direct`, serve `dashboard/dist-direct/` (for example `python3 -m http.server 8796 --directory dashboard/dist-direct`), choose "Već imam token", and paste any 32 hex characters such as `0123456789abcdef0123456789abcdef`. The fake accepts any token.
+- **No server at all:** `/dashboard/?demo` shows built-in invented data.
+
 ## Files
 
 - `fake-moodle.mjs`: the fake Merlin (`moodle_read_file` and `/api/file` refuse it on purpose: they only fetch from moodle.srce.hr). Serves `/<yyyy-yyyy>/webservice/rest/server.php` for the web-service functions the tools use, and `pluginfile.php` for one PDF. Dates are relative to now. `PORT`, `HOST` (default `127.0.0.1`) and `FAKE_MOODLE_QUIET=1` are the only knobs.

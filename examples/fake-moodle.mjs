@@ -267,7 +267,8 @@ const server = createServer(async (req, res) => {
 					? fail('invalidtoken', 'Invalid token - token not found')
 					: call(String(params.wsfunction ?? ''), params, year, origin);
 			if (!QUIET) console.error(`[fake-moodle] ${year} ${params.wsfunction ?? '?'}${out?.exception ? ` -> ${out.errorcode}` : ''}`);
-			res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' }).end(JSON.stringify(out));
+			// Like the real Merlin, any page may call the web service (the dashboard's direct build does).
+			res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8', 'Access-Control-Allow-Origin': '*' }).end(JSON.stringify(out));
 			return;
 		}
 		if (/\/pluginfile\.php\//.test(url.pathname)) {
