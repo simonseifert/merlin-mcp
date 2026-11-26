@@ -12,6 +12,9 @@ const readme = read('README.md');
 describe('docs match the code', () => {
 	it('package.json, VERSION and the changelog agree', () => {
 		expect(JSON.parse(read('package.json')).version).toBe(VERSION);
+		const registry = JSON.parse(read('server.json'));
+		expect(registry.version).toBe(VERSION);
+		expect(registry.packages[0].identifier).toBe(`ghcr.io/simonseifert/merlin-mcp:v${VERSION}`);
 		expect(read('CHANGELOG.md')).toMatch(new RegExp(`^## ${VERSION.replaceAll('.', '\\.')} \\(\\d{4}-\\d{2}-\\d{2}\\)$`, 'm'));
 	});
 

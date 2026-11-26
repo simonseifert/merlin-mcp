@@ -221,7 +221,7 @@ The Node build speaks MCP over stdin/stdout for one local client. It never offer
 npm ci && npm run build:node
 claude mcp add merlin -e MOODLE_TOKEN=<token> -- node /path/to/merlin-mcp/dist/node.js --stdio
 # or with Docker:
-claude mcp add merlin -- docker run -i --rm --env-file /path/to/merlin.env merlin-mcp --stdio
+claude mcp add merlin -- docker run -i --rm --env-file /path/to/merlin.env ghcr.io/simonseifert/merlin-mcp:latest --stdio
 ```
 
 Codex, Gemini CLI, Cursor, Hermes and OpenClaw take the same `command` + `args` (+ `env`) shape for stdio servers.

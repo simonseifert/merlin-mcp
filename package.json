@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
+    "build": "npm run build:dashboard",
     "build:dashboard": "npm --prefix dashboard ci && npm --prefix dashboard run build",
     "deploy": "npm run build:dashboard && wrangler deploy",
     "tail": "wrangler tail",
@@ -15,18 +16,18 @@
     "dashboard": "npm run build:dashboard && npm run build:node && node --env-file=merlin.env dist/node.js"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.8",
+    "@hono/node-server": "^2.1.11",
     "@modelcontextprotocol/sdk": "1.32.2",
-    "hono": "^4.13.18",
+    "hono": "^4.13.22",
     "unpdf": "^2.2.1",
     "zod": "^4.6.7"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20261115.1",
+    "@cloudflare/workers-types": "^5.20261125.1",
     "@types/node": "^22.20.5",
     "typescript": "^7.0.2",
-    "vitest": "^5.1.0",
-    "wrangler": "^4.162.0"
+    "vitest": "^5.1.2",
+    "wrangler": "^4.168.0"
   },
   "engines": {
     "node": ">=22.13"
@@ -40,5 +41,24 @@
     "type": "git",
     "url": "https://github.com/simonseifert/merlin-mcp.git"
   },
-  "homepage": "https://github.com/simonseifert/merlin-mcp"
+  "homepage": "https://github.com/simonseifert/merlin-mcp",
+  "cloudflare": {
+    "bindings": {
+      "MOODLE_TOKEN": {
+        "description": "Your Merlin web-service token. Get it with `node scripts/get-token.mjs` (README, \"Getting your token\")."
+      },
+      "MCP_BEARER": {
+        "description": "A long random secret that opens /mcp for your AI client. Make one with `openssl rand -hex 32`."
+      },
+      "API_BEARER": {
+        "description": "A different long random secret for /api/* (scripts and automation)."
+      },
+      "DASHBOARD_KEY": {
+        "description": "Optional: a long random secret that opens only the web dashboard at /dashboard/#key=<it>."
+      },
+      "APPROVALS": {
+        "description": "Storage for message sends waiting for your phone approval. Nothing to set."
+      }
+    }
+  }
 }

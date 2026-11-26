@@ -19,10 +19,11 @@ Features that act on graded work or speak for the student without them: quiz att
 
 1. Merge or close open Dependabot PRs, then `npm audit --omit=dev`.
 2. CHANGELOG: rename "Unreleased" to `## X.Y.Z (YYYY-MM-DD)` and check it covers `git log vPREV..main`.
-3. Bump the version in `package.json` (and `package-lock.json`, via `npm version X.Y.Z --no-git-tag-version`) and `VERSION` in `src/lib.ts`. `test/docs.test.ts` fails until all three and the CHANGELOG heading agree.
+3. Bump the version in `package.json` (and `package-lock.json`, via `npm version X.Y.Z --no-git-tag-version`), `VERSION` in `src/lib.ts`, and `version` plus the image tag in `server.json`. `test/docs.test.ts` fails until they and the CHANGELOG heading agree.
 4. `npm run typecheck && npm test && npm run build:node && npm run build:dashboard && npm --prefix dashboard run build:direct`.
 5. Smoke test against the fake Merlin (examples/README.md): `/healthz`, a tool call, `/dashboard/?demo`, the dashboard with `DASHBOARD_KEY=demo`.
-6. Commit "Release X.Y.Z", `git tag -a vX.Y.Z -m "X.Y.Z"`, push main and the tag, `gh release create vX.Y.Z` with the CHANGELOG section as notes.
+6. Commit "Release X.Y.Z", `git tag -a vX.Y.Z -m "X.Y.Z"`, push main and the tag. The Release workflow checks the tag against the code, publishes `ghcr.io/simonseifert/merlin-mcp:vX.Y.Z` (and `latest`) and creates the GitHub release from the CHANGELOG section.
+6b. Optional: publish `server.json` to the MCP registry with `mcp-publisher publish` (after `mcp-publisher login github`).
 7. Deploy (`npm run deploy`) and check `/healthz` shows the new version, `moodle_whoami` answers for each year, and `/dashboard/` loads.
 
 ## Reporting security problems

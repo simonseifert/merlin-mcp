@@ -49,6 +49,13 @@ Things to know:
 
 ## Run it
 
+**Quickest paths**
+
+- **Cloudflare, one click:** [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/simonseifert/merlin-mcp). It copies the repo to your GitHub, asks for `MOODLE_TOKEN`, `MCP_BEARER`, `API_BEARER` and the optional `DASHBOARD_KEY` (descriptions in `package.json`, list in `.dev.vars.example`), and builds the dashboard (`npm run build`) before deploying (the button flow itself is unverified; report problems in an issue). Then open `https://<your-worker>/healthz`.
+- **Docker, no build:** from 0.7.0 every release is published as `ghcr.io/simonseifert/merlin-mcp` (amd64 and arm64). `docker run --env-file merlin.env -p 127.0.0.1:8787:8787 -v merlin-data:/data ghcr.io/simonseifert/merlin-mcp:latest`, or with `--stdio` for one local client.
+- **MCP registry:** `server.json` describes the Docker image for registries that list MCP servers.
+
+
 **Cloudflare Worker**
 
 ```bash

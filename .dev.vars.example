@@ -1,0 +1,6 @@
+# Secrets for the Cloudflare Worker. For local `npm run dev`, copy to .dev.vars (gitignored).
+# The "Deploy to Cloudflare" button asks for these. Make bearers with: openssl rand -hex 32
+MOODLE_TOKEN=
+MCP_BEARER=
+API_BEARER=
+DASHBOARD_KEY=

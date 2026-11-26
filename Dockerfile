@@ -21,6 +21,11 @@ COPY src /app/src
 RUN npm run build
 
 FROM node:22-slim
+# Ownership label for the MCP registry (server.json).
+LABEL io.modelcontextprotocol.server.name="io.github.simonseifert/merlin-mcp" \
+      org.opencontainers.image.source="https://github.com/simonseifert/merlin-mcp" \
+      org.opencontainers.image.description="Read-only MCP server for Merlin (SRCE's Moodle)" \
+      org.opencontainers.image.licenses="MIT"
 WORKDIR /app
 ENV NODE_ENV=production HOST=0.0.0.0 PORT=8787 MERLIN_DB=/data/merlin.sqlite NODE_NO_WARNINGS=1
 COPY --from=build /app/node_modules ./node_modules

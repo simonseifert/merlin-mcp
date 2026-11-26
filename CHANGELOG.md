@@ -15,10 +15,16 @@
 - `moodle_get_upcoming_deadlines` takes `quiz_details` (default `true`); `moodle_get_calendar_events` takes `days_back`.
 - CLIENTS.md covers Claude Desktop, VS Code, Windsurf and LM Studio.
 
+**Installing.**
+- A Deploy to Cloudflare button (secret descriptions in `package.json`, `.dev.vars.example`; a root `build` script builds the dashboard).
+- On every version tag the Release workflow publishes `ghcr.io/simonseifert/merlin-mcp` (amd64 and arm64) and creates the GitHub release from this file.
+- `server.json` for the MCP registry (validated against the 2025-12-11 schema), and the image carries the registry's ownership label.
+
 **Under the hood.**
 - Every cache entry is keyed by a hash of the token as well as the year. `moodle_whoami` and the first user-id lookup share one site-info call.
 - The dashboard's data code lives in `src/dashboard-build.ts`, shared by the server and the direct build.
 - CI builds and typechecks both dashboard builds and the Docker image. `test/docs.test.ts` keeps README, SECURITY.md, `merlin.env.example`, the version and this changelog in step with the code.
+- Dependencies: hono 4.13.20, @hono/node-server 2.1.11, wrangler, vitest and workers-types (Dependabot #9, #10, #11).
 - README reordered (token, run, clients first) with a Configuration table; SECURITY.md covers the dashboard and direct mode; CONTRIBUTING has a release checklist; PR and feature-request templates.
 
 ## 0.6.2 (2026-11-23)
