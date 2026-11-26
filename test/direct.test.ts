@@ -94,6 +94,8 @@ describe('direct client', () => {
 		const f = fake();
 		const c = createClient(TOKEN, Y, { fetch: f.fetchFn, now: () => NOW });
 		const main = await buildMain(c.tools, Y, NOW);
+		const cal = f.seen.find((x) => x.fn === 'core_calendar_get_calendar_events')!;
+		expect(new URL(cal.url).searchParams.get('options[timestart]')).toBe(String(S - 14 * 86400)); // two weeks back, for past events
 		expect(main.user?.fullname).toBe('Test Student');
 		expect(main.courses).toEqual([expect.objectContaining({ key: `${Y}:10`, name: 'Test Course 101', items: [] })]);
 		expect(main.exams.map((e) => e.title)).toEqual(['Međuispit']);

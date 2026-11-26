@@ -14,8 +14,30 @@ export type ToolCaller = (name: string, args?: Record<string, unknown>) => Promi
 
 export type EventKind = 'exam' | 'seminar' | 'deadline' | 'class' | 'event';
 
-const EXAM = /(ispit|kolokvij|me[đd]uispit|zavr[šs]n|pismen|usmen|parcijal|provjer[ae] znanja|\btest\b|\bexam|mid[- ]?term|\bfinal)/i;
-const SEMINAR = /(seminar|esej|essay|prezentacij|presentation|referat|projekt|project|case stud|studij slu[čc]aja|poster|term paper)/i;
+// Word starts only, so "Ispitivanje softvera" is not an exam and "Projektni menadžment" is not a seminar.
+// "Test" alone counts as an exam only when it is not a Moodle quiz (weekly quizzes are often called "Test 3").
+const EXAM =
+	/(\bispit(?:a|u|i|om|ni|na|no|ne|nog|nom|nih)?\b|\bkolokvij\w*|\bme[đd]u-?ispit\w*|\bparcijal\w*|\bprovjer\w* znanja|\bexam\w*|\bmid-?\s?term\w*|\bfinal exam\w*)/i;
+const TEST_WORD = /\btest\b/i;
+const SEMINAR =
+	/(\bseminar\w*|\besej\w*|\bessay\w*|\bprezentacij\w*|\bpresentation\w*|\breferat\w*|\bprojekt(?:a|u|om)?\b|\bprojektn\w* (?:zadat\w*|rad\w*)|\bproject\b|\bcase stud\w*|\bstudij\w* slu[čc]aj\w*|\bposter\w*|\bterm paper\w*)/i;
+
+/** Extra words a faculty uses (MERLIN_EXAM_WORDS / MERLIN_SEMINAR_WORDS, comma separated); matched at word starts. */
+let extraExam: RegExp | undefined;
+let extraSeminar: RegExp | undefined;
+const wordsRegex = (list?: string): RegExp | undefined => {
+	const words = (list ?? '')
+		.split(',')
+		.map((w) => w.trim())
+		.filter(Boolean)
+		.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+	return words.length ? new RegExp(`(?:^|[^\\p{L}\\p{N}])(?:${words.join('|')})`, 'iu') : undefined;
+};
+export function configureClassification(opts: { examWords?: string; seminarWords?: string }): void {
+	extraExam = wordsRegex(opts.examWords);
+	extraSeminar = wordsRegex(opts.seminarWords);
+}
+
 // Moodle's own "X is due" / "Rok za X deadline" wording, in English and Croatian.
 const DUE_SUFFIX = /\s+(is due|closes|opens|deadline|rok( za predaju)?|zatvara se|otvara se)$/i;
 const DUE_PREFIX = /^(rok za|rok predaje za|zatvaranje:?|otvaranje:?)\s+/i;
@@ -24,8 +46,9 @@ export const cleanTitle = (name: string) => name.replace(DUE_PREFIX, '').replace
 /** What kind of item a calendar event or assignment is, from its name and Moodle type. Exams win over seminars. */
 export function classifyItem(name: string, opts: { description?: string; activity?: string; eventtype?: string } = {}): EventKind {
 	const title = cleanTitle(name);
-	if (EXAM.test(title)) return 'exam';
-	if (SEMINAR.test(title)) return 'seminar';
+	if (EXAM.test(title) || extraExam?.test(title)) return 'exam';
+	if (TEST_WORD.test(title) && opts.activity !== 'quiz') return 'exam';
+	if (SEMINAR.test(title) || extraSeminar?.test(title)) return 'seminar';
 	// Description only as a weaker hint: "kolokvij" in a lecture's notes shouldn't make it an exam.
 	if (opts.activity === 'quiz' && opts.description && EXAM.test(opts.description)) return 'exam';
 	if (opts.eventtype === 'due' || opts.eventtype === 'close' || opts.activity === 'assign' || opts.activity === 'quiz') return 'deadline';
@@ -142,7 +165,7 @@ export async function buildMain(call: ToolCaller, year: string, now = Date.now()
 	const [who, courses, calendar, todo, assignments] = await Promise.all([
 		part('whoami', call('moodle_whoami', { year }), null),
 		part('courses', call('moodle_get_courses', { year }), null),
-		part('calendar', call('moodle_get_calendar_events', { days_ahead: 120, year }), null),
+		part('calendar', call('moodle_get_calendar_events', { days_ahead: 120, days_back: 14, year }), null),
 		part('deadlines', call('moodle_get_upcoming_deadlines', { days_ahead: 120, limit: 50, quiz_details: false, year }), null),
 		part('assignments', call('moodle_get_assignments', { year }), null),
 	]);

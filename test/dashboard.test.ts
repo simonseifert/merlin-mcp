@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import worker from '../src/index.js';
 import { __resetCaches } from '../src/app.js';
-import { __resetDashboardCache, classifyItem, cleanTitle, parsePercent } from '../src/dashboard.js';
+import { __resetDashboardCache, classifyItem, cleanTitle, configureClassification, parsePercent } from '../src/dashboard.js';
 import { dashboardFile, dashboardOpen } from '../src/node.js';
 
 // GET /api/dashboard through the real Worker entry, with a mocked Merlin. All data is fake.
@@ -97,7 +97,35 @@ describe('classifyItem', () => {
 		['Results - 1st midterm exam', 'exam'],
 		['Rok za Submitting the presentation deadline', 'seminar'],
 		['Term project', 'seminar'],
+		['Projekt: Kalkulator', 'seminar'],
+		['Projektni zadatak 2', 'seminar'],
+		['Pismeni test iz statistike', 'exam'],
+		['Kolokviji - rezultati', 'exam'],
+		// Not exams or seminars, though the old patterns said so.
+		['Ispitivanje softvera - predavanje', 'event'],
+		['Projektni menadžment - predavanje', 'event'],
+		['Završni rad: konzultacije', 'event'],
+		['Finalna verzija prezentacije uploadana', 'seminar'],
+		['Testiranje aplikacije', 'event'],
 	])('%s -> %s', (name, kind) => expect(classifyItem(name)).toBe(kind));
+
+	it('a weekly Moodle quiz called "Test" is a deadline, not an exam', () => {
+		expect(classifyItem('Test 3 closes', { activity: 'quiz', eventtype: 'close' })).toBe('deadline');
+		expect(classifyItem('Test iz matematike', { eventtype: 'course' })).toBe('exam');
+	});
+
+	it('takes a faculty\'s own words', () => {
+		expect(classifyItem('Praktikum 2')).toBe('event');
+		configureClassification({ examWords: 'praktikum, lab test', seminarWords: 'izvještaj' });
+		try {
+			expect(classifyItem('Praktikum 2')).toBe('exam');
+			expect(classifyItem('Lab test A')).toBe('exam');
+			expect(classifyItem('Laboratorijski izvještaj 1')).toBe('seminar');
+			expect(classifyItem('Superpraktikum')).toBe('event');
+		} finally {
+			configureClassification({});
+		}
+	});
 
 	it('uses Moodle types when the name says nothing', () => {
 		expect(classifyItem('Zadaća 3 is due', { activity: 'assign', eventtype: 'due' })).toBe('deadline');

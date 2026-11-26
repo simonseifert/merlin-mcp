@@ -150,10 +150,10 @@ export function createClient(token: string, year: string, opts: { fetch?: typeof
 		async moodle_get_courses() {
 			return tag((await courses()).map((c) => ({ id: c.id, shortname: c.shortname, fullname: c.fullname, visible: c.visible, startdate: c.startdate, enddate: c.enddate })));
 		},
-		async moodle_get_calendar_events({ days_ahead = 14 }) {
+		async moodle_get_calendar_events({ days_ahead = 14, days_back = 0 }) {
 			const t = nowS();
 			const params: Params = {
-				'options[timestart]': t,
+				'options[timestart]': t - days_back * 86400,
 				'options[timeend]': t + days_ahead * 86400,
 				'options[userevents]': 1,
 				'options[siteevents]': 1,

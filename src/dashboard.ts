@@ -21,7 +21,7 @@
 
 import { z } from 'zod';
 import { allTokens, currentYear, isValidYear, redactSecret } from './lib.js';
-import { buildAnnouncements, buildGrades, buildMain, type ToolCaller } from './dashboard-build.js';
+import { buildAnnouncements, buildGrades, buildMain, configureClassification, type ToolCaller } from './dashboard-build.js';
 
 export * from './dashboard-build.js';
 
@@ -70,7 +70,7 @@ const BUILDERS: Record<DashboardPart, (call: ToolCaller, year: string) => Promis
 };
 
 /** GET /api/dashboard[?part=main|grades|announcements][&year=yyyy-yyyy][&fresh=1]. Auth is checked by the caller. */
-type DashEnv = { MOODLE_URL?: string; MOODLE_TOKEN: string; MOODLE_TOKENS?: string };
+type DashEnv = { MOODLE_URL?: string; MOODLE_TOKEN: string; MOODLE_TOKENS?: string; MERLIN_EXAM_WORDS?: string; MERLIN_SEMINAR_WORDS?: string };
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', 'Referrer-Policy': 'no-referrer' };
 
 export async function handleDashboard(request: Request, env: DashEnv, register: Register): Promise<Response> {
@@ -79,6 +79,7 @@ export async function handleDashboard(request: Request, env: DashEnv, register: 
 	const url = new URL(request.url);
 	const year = url.searchParams.get('year') ?? currentYear(env);
 	if (!isValidYear(year)) return new Response(JSON.stringify({ error: 'year must look like 2026-2027' }), { status: 400, headers });
+	configureClassification({ examWords: env.MERLIN_EXAM_WORDS, seminarWords: env.MERLIN_SEMINAR_WORDS });
 	const part = (url.searchParams.get('part') ?? 'main') as DashboardPart;
 	if (!DASHBOARD_PARTS.includes(part)) return new Response(JSON.stringify({ error: `part must be one of ${DASHBOARD_PARTS.join(', ')}` }), { status: 400, headers });
 	const key = `${part}:${year}`;

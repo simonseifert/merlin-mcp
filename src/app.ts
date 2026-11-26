@@ -70,6 +70,8 @@ export interface Env extends NotifyEnv {
 	MOODLE_TOKENS?: string; // optional JSON map year -> token (secret); falls back to MOODLE_TOKEN
 	MCP_BEARER: string; // Your own shared secret to gate the MCP endpoint (secret)
 	DASHBOARD_KEY?: string; // secret that opens GET /api/dashboard only (the web dashboard keeps it in the browser)
+	MERLIN_EXAM_WORDS?: string; // dashboard: extra words that mark an exam at your faculty, comma separated
+	MERLIN_SEMINAR_WORDS?: string; // dashboard: extra words that mark a seminar or project, comma separated
 	DASHBOARD_OPEN?: string; // "1": /api/dashboard needs no key. Set by src/node.ts only for a loopback-only server; never on Workers
 	API_BEARER?: string; // secret for /api/* (automation); see README "Rotating the bearers"
 	LEGACY_API_BEARER?: string; // var: "1" lets MCP_BEARER open /api/* too (old single-bearer setups); anything else, or unset, keeps them separate
@@ -1025,19 +1027,21 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 		'Get calendar events (class sessions, deadlines, exams) in a window from now, across ALL enrolled courses of every active academic year, sorted by start time and tagged with `year`. Use this to detect schedule changes.',
 		{
 			days_ahead: z.number().int().min(1).max(365).default(14).describe('Look-ahead window in days from now'),
+			days_back: z.number().int().min(0).max(90).default(0).describe('Also include events from this many days before now (0 = from now)'),
 			course_ids: z.array(z.number().int()).optional().describe('Filter to specific course IDs'),
 			year: listYearParam,
 		},
-		async ({ days_ahead, course_ids, year }) => {
+		async ({ days_ahead, days_back, course_ids, year }) => {
 			const now = Math.floor(Date.now() / 1000);
 			const until = now + days_ahead * 86400;
+			const from = now - days_back * 86400;
 			const years = await yearsFor(env(), year);
 			const explicit = years.length === 1 && year !== 'all';
 			const fan = await fanOut(years, async (y) => {
 				// Per Merlin docs: timestart/timeend live under `options[]`, NOT `events[]`.
 				// `events[]` holds ID filters (eventids, courseids, groupids, categoryids).
 				const params: Record<string, string | number> = {
-					'options[timestart]': now,
+					'options[timestart]': from,
 					'options[timeend]': until,
 					'options[userevents]': 1,
 					'options[siteevents]': 1,

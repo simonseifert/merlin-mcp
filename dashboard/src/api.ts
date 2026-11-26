@@ -1,6 +1,6 @@
 import type { DashAnnouncements, Dashboard, DashGrades } from './types';
 import { demoDashboard } from './demo';
-import { buildAnnouncements, buildGrades, buildMain } from '../../src/dashboard-build';
+import { buildAnnouncements, buildGrades, buildMain, configureClassification } from '../../src/dashboard-build';
 import { createClient, isAuthError, type DirectClient } from './direct/merlin';
 import { getMerlin, type MerlinSession } from './direct/session';
 
@@ -11,6 +11,8 @@ export * from './direct/session';
  * account and this browser calls Merlin itself. No server is involved beyond serving the page.
  */
 export const DIRECT = import.meta.env.VITE_MERLIN_DIRECT === '1';
+// A host can teach direct mode its faculty's wording at build time (same as MERLIN_EXAM_WORDS on the server).
+if (DIRECT) configureClassification({ examWords: import.meta.env.VITE_MERLIN_EXAM_WORDS, seminarWords: import.meta.env.VITE_MERLIN_SEMINAR_WORDS });
 
 const KEY = 'marlon.key'; // single-user public server (#key= link)
 const LAST = 'marlon.last';
