@@ -2,7 +2,7 @@ import { motion, useIsPresent, useReducedMotion, type HTMLMotionProps } from 'mo
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { EventKind } from '../types';
-import { KIND_LABEL } from '../format';
+import { KIND_LABEL, safeUrl } from '../format';
 
 export const spring = { type: 'spring', stiffness: 260, damping: 30, mass: 0.9 } as const;
 
@@ -121,6 +121,17 @@ export function KindBadge({ kind }: { kind: EventKind }) {
 
 export function Dot({ color }: { color: string }) {
 	return <span className="dot" style={{ background: color, boxShadow: `0 0 0 3px ${color}22` }} />;
+}
+
+/** "Open in Merlin": a new tab, no opener, only for plain http(s) addresses. */
+export function MerlinLink({ url }: { url?: string }) {
+	const href = safeUrl(url);
+	if (!href) return null;
+	return (
+		<a className="link link--merlin" href={href} target="_blank" rel="noopener noreferrer">
+			Otvori u Merlinu<span className="sr-only"> (otvara se u novoj kartici)</span>
+		</a>
+	);
 }
 
 export function Empty({ title, children }: { title: string; children?: ReactNode }) {

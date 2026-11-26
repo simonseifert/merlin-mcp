@@ -76,10 +76,63 @@ export function coursePercent(c: DashCourse): number | undefined {
 
 export const nfmt = (n: number | undefined, digits = 1) => (n === undefined ? '–' : n.toLocaleString('hr-HR', { maximumFractionDigits: digits }));
 
+/**
+ * Course name without its leading code. Only code-like tokens are stripped: 4+ characters of A-Z, 0-9 and
+ * hyphens that contain a digit. Words, short tokens and "(M1)" style suffixes stay, so two groups of the
+ * same course never read the same. A trailing academic year in brackets is dropped.
+ *
+ *   "IT101 Baze podataka"       -> "Baze podataka"
+ *   "2627-ACC Računovodstvo"    -> "Računovodstvo"
+ *   "SQL baze podataka"         -> "SQL baze podataka"
+ *   "HTML i CSS"                -> "HTML i CSS"
+ *   "3D modeliranje"            -> "3D modeliranje"
+ *   "MAT1 Matematika (M1)"      -> "Matematika (M1)"
+ *   "Marketing (2026/2027)"     -> "Marketing"
+ */
 export function shortCourse(name?: string): string {
 	if (!name) return '';
-	return name.replace(/^\s*[A-Z0-9]{3,}\s+/, '').replace(/\s*\(.*?\)\s*$/, '');
+	const short = name
+		.replace(/^\s*(?:(?=[A-Z0-9-]*\d)[A-Z0-9][A-Z0-9-]{3,}\s+)+(?=\S)/, '')
+		.replace(/\s*\(\s*\d{4}\s*[/-]\s*\d{2,4}\s*\)\s*$/, '')
+		.trim();
+	return short || name.trim();
 }
+
+/** Plain http(s) addresses only: Merlin content is untrusted, so no javascript: or data: links. */
+export function safeUrl(url?: string): string | undefined {
+	if (!url) return undefined;
+	try {
+		const u = new URL(url);
+		return u.protocol === 'https:' || u.protocol === 'http:' ? u.href : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+const PART_WORDS: Record<string, string> = {
+	whoami: 'račun',
+	courses: 'predmeti',
+	calendar: 'kalendar',
+	deadlines: 'rokovi',
+	assignments: 'zadaće',
+	grades: 'bodovi',
+	announcements: 'obavijesti',
+	main: 'osnovni podaci',
+};
+/** "grades 2026-2027" -> "bodovi": error part ids in human words, each named once. */
+export function partWords(parts: Array<{ part: string }>): string {
+	const words = parts.map((p) => {
+		const id = p.part.split(/[\s:]/)[0];
+		return PART_WORDS[id] ?? id;
+	});
+	return [...new Set(words)].join(', ');
+}
+
+/** True when the grades could not be loaded (any error part starting with "grades"). */
+export const gradesFailed = (errors?: Array<{ part: string }>): boolean => !!errors?.some((e) => e.part.startsWith('grades'));
+
+export const fmtDayNum = (s: number) => fmt({ day: 'numeric' }).format(s * 1000);
+export const fmtMonthShort = (s: number) => fmt({ month: 'short' }).format(s * 1000);
 
 /** What has been graded so far: points earned out of points available. */
 export function gradedSoFar(c: DashCourse) {

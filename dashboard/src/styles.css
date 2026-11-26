@@ -1346,6 +1346,35 @@ a:focus-visible,
 	outline-offset: 2px;
 }
 
+/* ---------- past things ---------- */
+.is-past,
+.cell--past:not(.cell--sel) {
+	opacity: 0.55;
+}
+.cell--past.cell--sel .cell__num {
+	opacity: 0.7;
+}
+.countdown-chip--past {
+	background: var(--hair);
+	color: var(--muted);
+}
+.link--merlin {
+	margin: 4px 0 0 -6px;
+	justify-self: start;
+	font-size: 13px;
+}
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
 /* ---------- accessibility ---------- */
 /* A real button (or link) stretched over a clickable card. */
 .glass__hit {

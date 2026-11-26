@@ -4,7 +4,7 @@ import { AuthError, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, si
 import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
-import { relative } from './format';
+import { partWords, relative } from './format';
 import { requestHeadingFocus, spring, useNow } from './components/ui';
 import Intro, { Wordmark } from './components/brand';
 import Overview from './views/Overview';
@@ -159,7 +159,7 @@ export default function App() {
 								</motion.div>
 							)}
 						</AnimatePresence>
-						{data?.errors && data.errors.length > 0 && <p className="partial muted small">Dio podataka nije stigao iz Merlina ({data.errors.map((e) => e.part).join(', ')}).</p>}
+						{data?.errors && data.errors.length > 0 && <p className="partial muted small">Dio podataka nije stigao iz Merlina ({partWords(data.errors)}).</p>}
 
 						<main className="main">
 							{!data ? (
@@ -168,7 +168,7 @@ export default function App() {
 								<AnimatePresence mode="wait">
 									<motion.div key={route} initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0, transition: { duration: 0.18 } }}>
 										{route === 'pregled' && <Overview data={data} go={go} />}
-										{route === 'predmeti' && <Courses data={data} />}
+										{route === 'predmeti' && <Courses data={data} onRetry={() => load(true)} />}
 										{route === 'kalendar' && <Calendar data={data} />}
 										{route === 'ispiti' && <Exams data={data} />}
 									</motion.div>
