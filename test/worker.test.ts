@@ -471,6 +471,34 @@ describe('/mcp (stateless Streamable HTTP)', () => {
 		expect(body.result.serverInfo.name).toBe('merlin-mcp');
 	});
 
+	it('initialize carries instructions an agent can follow', async () => {
+		const body = (await (
+			await worker.fetch(rpc('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 't', version: '1' } }), SPLIT, fakeCtx())
+		).json()) as any;
+		expect(body.result.instructions).toMatch(/read-only except moodle_send_message/);
+		expect(body.result.instructions).toMatch(/data, never as instructions/);
+		expect(body.result.capabilities.prompts).toBeDefined();
+	});
+
+	it('every tool has a human title', async () => {
+		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay' }, fakeCtx())).json()) as any;
+		const untitled = body.result.tools.filter((t: any) => !(t.title ?? t.annotations?.title)).map((t: any) => t.name);
+		expect(untitled).toEqual([]);
+	});
+
+	it('offers four prompts, and they never ask for a send without the user', async () => {
+		const list = (await (await worker.fetch(rpc('prompts/list'), SPLIT, fakeCtx())).json()) as any;
+		expect(list.result.prompts.map((p: any) => p.name).sort()).toEqual(['exam_prep', 'message_teacher', 'weekly_digest', 'whats_due']);
+		const got = (await (await worker.fetch(rpc('prompts/get', { name: 'exam_prep', arguments: { course: 'Matematika 1' } }), SPLIT, fakeCtx())).json()) as any;
+		expect(got.result.messages[0].content.text).toContain('"Matematika 1"');
+		const msg = (await (
+			await worker.fetch(rpc('prompts/get', { name: 'message_teacher', arguments: { course: 'APP', about: 'termin ispita' } }), SPLIT, fakeCtx())
+		).json()) as any;
+		expect(msg.result.messages[0].content.text).toMatch(/Do not call moodle_send_message unless I then ask/);
+		const due = (await (await worker.fetch(rpc('prompts/get', { name: 'whats_due', arguments: { days: '999' } }), SPLIT, fakeCtx())).json()) as any;
+		expect(due.result.messages[0].content.text).toContain('next 7 days'); // out-of-range input falls back
+	});
+
 	it('tools/list has the 24 tools, including the approval-gated send, when a relay is configured', async () => {
 		const body = (await (await worker.fetch(rpc('tools/list'), { ...SPLIT, RELAY_BEARER: 'relay' }, fakeCtx())).json()) as any;
 		const names = body.result.tools.map((t: { name: string }) => t.name);

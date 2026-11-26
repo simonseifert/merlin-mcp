@@ -60,6 +60,7 @@ import {
 import { extractFileText, READ_FILE_MAX_BYTES } from './filetext.js';
 import { notifierConfigured, notifyOutcome, notifyPending, type NotifyEnv } from './notify.js';
 import { handleDashboard } from './dashboard.js';
+import { registerPrompts, SERVER_INSTRUCTIONS, TOOL_TITLES } from './agent.js';
 import { DAILY_SEND_CAP, PENDING_TTL_MS, type ApprovalsApi, type PendingSend } from './approvals.js';
 
 export interface Env extends NotifyEnv {
@@ -1009,7 +1010,7 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 	// Every tool except moodle_send_message only reads, so clients can run them without a confirm prompt.
 	const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 	const readTool = <A extends ZodRawShapeCompat>(name: string, description: string, shape: A, cb: ToolCallback<A>) =>
-		server.tool(name, description, shape, READ_ONLY, cb);
+		server.tool(name, description, shape, { ...READ_ONLY, ...(TOOL_TITLES[name] ? { title: TOOL_TITLES[name] } : {}) }, cb);
 
 	// 1. Notifications (popup messages Merlin shows in the bell icon)
 	readTool(
@@ -2010,8 +2011,9 @@ export function registerTools(server: McpServer, getEnv: () => Env, ctx?: RunCtx
 }
 
 export function createServer(env: Env, ctx?: RunCtx): McpServer {
-	const server = new McpServer({ name: 'merlin-mcp', version: VERSION });
+	const server = new McpServer({ name: 'merlin-mcp', version: VERSION }, { instructions: SERVER_INSTRUCTIONS });
 	registerTools(server, () => env, ctx);
+	registerPrompts(server);
 	return server;
 }
 
