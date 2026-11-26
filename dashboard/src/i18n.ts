@@ -226,7 +226,7 @@ const en: Record<Key, string> = {
 	'nav.pregled': 'Overview',
 	'nav.predmeti': 'Courses',
 	'nav.kalendar': 'Calendar',
-	'nav.ispiti': 'Exams and seminars',
+	'nav.ispiti': 'Exams',
 	'top.updated': 'updated {when}',
 	'top.refresh': 'Refresh',
 	'top.lite': 'Lite mode (no 3D background)',

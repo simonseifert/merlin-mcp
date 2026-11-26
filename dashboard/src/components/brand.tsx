@@ -23,7 +23,10 @@ export default function Intro({ onDone }: { onDone: () => void }) {
 	useEffect(() => {
 		const t = setTimeout(onDone, reduce ? 450 : 3200);
 		// Any key skips it (a click does too, on the overlay itself). Shown once per browser.
-		const skip = () => onDone();
+		const skip = (e: KeyboardEvent) => {
+			if (e.key === ' ') e.preventDefault(); // Space would also scroll the page behind
+			onDone();
+		};
 		window.addEventListener('keydown', skip);
 		return () => {
 			clearTimeout(t);
