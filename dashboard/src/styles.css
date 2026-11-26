@@ -1498,8 +1498,21 @@ h1:focus,
 		padding: 12px 14px 110px;
 	}
 	.topbar {
-		grid-template-columns: 1fr auto;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
 		top: 10px;
+	}
+	/* The controls stay in one row; when they do not fit beside the logo the whole row drops below it. */
+	.topbar__right {
+		flex-wrap: nowrap;
+		gap: 8px;
+		margin-left: auto;
+	}
+	.year-select {
+		padding: 0 26px 0 12px;
 	}
 	/* Nav becomes a floating tab bar at the bottom, like iOS. */
 	.nav {
