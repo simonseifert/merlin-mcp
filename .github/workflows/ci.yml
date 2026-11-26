@@ -21,5 +21,17 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build:node
+      - name: Dashboard (both builds, typechecked)
+        run: |
+          npm --prefix dashboard ci
+          npm --prefix dashboard run build
+          npm --prefix dashboard run build:direct
       - name: Dependency audit (shipped dependencies only)
         run: npm audit --omit=dev --audit-level=high
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Docker image builds
+        run: docker build -t merlin-mcp:ci .

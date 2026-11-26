@@ -16,6 +16,8 @@ WORKDIR /app/dashboard
 COPY dashboard/package.json dashboard/package-lock.json ./
 RUN npm ci
 COPY dashboard ./
+# The direct-mode client shares the dashboard's data code with the server (src/dashboard-build.ts, src/lib.ts).
+COPY src /app/src
 RUN npm run build
 
 FROM node:22-slim
