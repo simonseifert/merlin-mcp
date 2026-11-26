@@ -1,6 +1,6 @@
 import { AnimatePresence, motion, MotionConfig, useReducedMotion } from 'motion/react';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { AuthError, currentAcademicYear, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, pendingYear, signIn, signOut, tokenFromHash } from './api';
+import { AuthError, DIRECT, fetchDashboard, getMerlin, isDemo, lastDashboard, signIn, signOut, tokenFromHash } from './api';
 import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
@@ -84,7 +84,7 @@ export default function App() {
 	// Auto-return from SRCE (desktop): the token came back in the URL, so validate it and go in.
 	useEffect(() => {
 		if (!hashToken) return;
-		signIn(hashToken, pendingYear() ?? currentAcademicYear())
+		signIn(hashToken.token, hashToken.year)
 			.then(() => {
 				setAuth(undefined);
 				return load(true);

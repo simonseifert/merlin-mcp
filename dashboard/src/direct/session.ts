@@ -95,7 +95,8 @@ export function registerAuthHandler(): void {
 export function launchUrl(year: string, autoReturn = false): string {
 	const passport = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 20);
 	try {
-		localStorage.setItem(PENDING_YEAR, year);
+		// Remembered so a token coming back in the address bar is accepted only after a sign-in this browser started.
+		localStorage.setItem(PENDING_YEAR, JSON.stringify({ year, at: Date.now() }));
 	} catch {
 		/* ignore */
 	}
@@ -105,21 +106,34 @@ export function launchUrl(year: string, autoReturn = false): string {
 	return `https://moodle.srce.hr/${year}/admin/tool/mobile/launch.php?service=moodle_mobile_app&passport=${passport}&urlscheme=${encodeURIComponent(scheme)}`;
 }
 
-export function pendingYear(): string | undefined {
+const PENDING_MAX_MS = 15 * 60_000;
+
+/** The sign-in this browser started (year), if it is recent; read once, then forgotten. */
+function takePending(): string | undefined {
 	try {
-		return localStorage.getItem(PENDING_YEAR) ?? undefined;
+		const raw = localStorage.getItem(PENDING_YEAR);
+		localStorage.removeItem(PENDING_YEAR);
+		const p = raw ? (JSON.parse(raw) as { year?: string; at?: number }) : undefined;
+		return p?.year && typeof p.at === 'number' && Date.now() - p.at < PENDING_MAX_MS ? p.year : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
-/** If the browser returned a token to us via the handler (#tok=…), pull it out and wipe it from the URL. */
-export function tokenFromHash(): string | null {
+/**
+ * If the browser returned a token to us via the handler (#tok=…), pull it out and wipe it from the URL.
+ * Only accepted when this browser started a sign-in in the last 15 minutes, and only once: otherwise a
+ * link carrying someone else's token could sign a student in as that account without them noticing.
+ */
+export function tokenFromHash(): { token: string; year: string } | null {
 	const m = /[#&]tok=([^&]+)/.exec(location.hash);
 	if (!m) return null;
 	history.replaceState(null, '', location.pathname + location.search);
+	const year = takePending();
+	if (!year) return null;
 	try {
-		return extractToken(decodeURIComponent(m[1]));
+		const token = extractToken(decodeURIComponent(m[1]));
+		return token ? { token, year } : null;
 	} catch {
 		return null;
 	}
