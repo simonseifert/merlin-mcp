@@ -2,7 +2,8 @@ import { motion, useIsPresent, useReducedMotion, type HTMLMotionProps } from 'mo
 import { useCallback, useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { EventKind } from '../types';
-import { KIND_LABEL, safeUrl } from '../format';
+import { kindLabel, safeUrl } from '../format';
+import { getLang, setLang, t } from '../i18n';
 
 export const spring = { type: 'spring', stiffness: 260, damping: 30, mass: 0.9 } as const;
 
@@ -70,7 +71,7 @@ export function Ring({ value, size = 76, stroke = 8, color = '#0a84ff', label, s
 	const r = (size - stroke) / 2;
 	const c = 2 * Math.PI * r;
 	const v = value === undefined ? 0 : Math.max(0, Math.min(100, value));
-	const spoken = value === undefined ? 'nema podataka' : `${Math.round(v)} posto`;
+	const spoken = value === undefined ? t('ring.none') : t('ring.pct', { n: Math.round(v) });
 	return (
 		<div className="ring" style={{ width: size, height: size }} role="img" aria-label={name ? `${name}: ${spoken}` : spoken}>
 			<svg aria-hidden="true" width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
@@ -107,7 +108,7 @@ export function Ring({ value, size = 76, stroke = 8, color = '#0a84ff', label, s
 
 export function Bar({ value, color, label }: { value?: number; color: string; label?: string }) {
 	const v = value === undefined ? 0 : Math.max(0, Math.min(100, value));
-	const spoken = value === undefined ? 'nema podataka' : `${Math.round(v)} posto`;
+	const spoken = value === undefined ? t('ring.none') : t('ring.pct', { n: Math.round(v) });
 	return (
 		<div className="bar" role="img" aria-label={label ? `${label}: ${spoken}` : spoken}>
 			<motion.div className="bar__fill" style={{ background: `linear-gradient(90deg, ${color}aa, ${color})` }} initial={{ width: 0 }} animate={{ width: `${v}%` }} transition={{ duration: 1.1, ease: [0.22, 1, 0.36, 1], delay: 0.2 }} />
@@ -116,11 +117,30 @@ export function Bar({ value, color, label }: { value?: number; color: string; la
 }
 
 export function KindBadge({ kind }: { kind: EventKind }) {
-	return <span className={`badge badge--${kind}`}>{KIND_LABEL[kind]}</span>;
+	return <span className={`badge badge--${kind}`}>{kindLabel(kind)}</span>;
 }
 
 export function Dot({ color }: { color: string }) {
 	return <span className="dot" style={{ background: color, boxShadow: `0 0 0 3px ${color}22` }} />;
+}
+
+/** A translated string where `backtick` pairs become <code>. */
+export function Rich({ text }: { text: string }) {
+	return (
+		<>
+			{text.split('`').map((part, i) => (i % 2 ? <code key={i}>{part}</code> : part))}
+		</>
+	);
+}
+
+/** Switches the interface between Croatian and English (the label shows the language it switches to). */
+export function LangToggle({ className = '' }: { className?: string }) {
+	const next = getLang() === 'hr' ? 'en' : 'hr';
+	return (
+		<button type="button" className={`icon-btn lang-btn ${className}`} onClick={() => setLang(next)} aria-label={t('lang.switch')} title={t('lang.switch')} lang={next}>
+			{t('lang.label')}
+		</button>
+	);
 }
 
 /** "Open in Merlin": a new tab, no opener, only for plain http(s) addresses. */
@@ -129,7 +149,7 @@ export function MerlinLink({ url }: { url?: string }) {
 	if (!href) return null;
 	return (
 		<a className="link link--merlin" href={href} target="_blank" rel="noopener noreferrer">
-			Otvori u Merlinu<span className="sr-only"> (otvara se u novoj kartici)</span>
+			{t('openInMerlin')}<span className="sr-only">{t('newTab')}</span>
 		</a>
 	);
 }
@@ -260,7 +280,7 @@ export function Sheet({ open, onClose, children, title, accent }: { open: boolea
 			>
 				<div className="sheet__head">
 					<h2 id={titleId}>{title}</h2>
-					<button type="button" className="icon-btn" onClick={onClose} aria-label="Zatvori">
+					<button type="button" className="icon-btn" onClick={onClose} aria-label={t('close')}>
 						<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M2 2l10 10M12 2L2 12" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" /></svg>
 					</button>
 				</div>

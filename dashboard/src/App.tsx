@@ -6,7 +6,8 @@ import Login from './views/Login';
 import type { Dashboard } from './types';
 import { ROUTES, routeFromHash, type Route } from './routes';
 import { partWords, relative } from './format';
-import { requestHeadingFocus, spring, useNow } from './components/ui';
+import { LangToggle, Rich, requestHeadingFocus, spring, useNow } from './components/ui';
+import { t, useLang } from './i18n';
 import Intro, { Wordmark } from './components/brand';
 import Overview from './views/Overview';
 import Courses from './views/Courses';
@@ -42,6 +43,7 @@ const webgl = (() => {
 const ADD_YEAR = '+add';
 
 export default function App() {
+	useLang(); // re-render everything when the language changes
 	const [route, setRoute] = useState<Route>(routeFromHash);
 	const [data, setData] = useState<Dashboard | undefined>(lastDashboard);
 	const [loading, setLoading] = useState(true);
@@ -94,7 +96,7 @@ export default function App() {
 			if (err instanceof AuthError) {
 				setData(undefined);
 				setAuth(err.kind);
-			} else if (!quiet) setError(err instanceof Error ? err.message : 'Nešto je pošlo krivo.');
+			} else if (!quiet) setError(err instanceof Error ? err.message : t('err.generic'));
 		} finally {
 			inflight.current = false;
 			if (!quiet) setLoading(false);
@@ -148,7 +150,7 @@ export default function App() {
 				return load(true);
 			})
 			.catch((err) => {
-				setError(err instanceof Error ? err.message : 'Prijava nije uspjela.');
+				setError(err instanceof Error ? err.message : t('err.login'));
 				setAuth('merlin');
 			});
 		// eslint-disable-next-line react-hooks/exhaustive-deps
@@ -182,43 +184,44 @@ export default function App() {
 						<header className="topbar">
 							<div className="brand">
 								<Wordmark className="brand__name" />
-								{isDemo() && <span className="pill pill--demo">demo</span>}
+								{isDemo() && <span className="pill pill--demo">{t('demo')}</span>}
 							</div>
-							<nav className="segmented nav" aria-label="Stranice">
+							<nav className="segmented nav" aria-label={t('nav.aria')}>
 								{ROUTES.map((r) => (
 									<button key={r.id} className={route === r.id ? 'is-active' : ''} onClick={() => go(r.id)} aria-current={route === r.id ? 'page' : undefined}>
 										{route === r.id && <motion.span layoutId="nav-pill" className="segmented__pill" transition={spring} />}
-										<span>{r.label}</span>
+										<span>{t(`nav.${r.id}`)}</span>
 									</button>
 								))}
 							</nav>
 							<div className="topbar__right">
-								{data && <span className="muted small updated">ažurirano {relative(Math.min(data.generated_at, now), now)}</span>}
+								{data && <span className="muted small updated">{t('top.updated', { when: relative(Math.min(data.generated_at, now), now) })}</span>}
+								<LangToggle />
 								{DIRECT && sessions.length > 0 && (
 									<select
 										className="year-select"
-										aria-label="Akademska godina"
+										aria-label={t('top.year')}
 										value={getMerlin()?.year ?? ''}
 										onChange={(e) => (e.target.value === ADD_YEAR ? setAdding(true) : switchYear(e.target.value))}
 									>
 										{sessions.map((s) => (
 											<option key={s.year} value={s.year}>{s.year}</option>
 										))}
-										<option value={ADD_YEAR}>+ Dodaj godinu…</option>
+										<option value={ADD_YEAR}>{t('top.addYear')}</option>
 									</select>
 								)}
 								{!reduce && (
-									<button type="button" className="icon-btn" onClick={toggleLite} aria-pressed={lite} aria-label="Lagani način (bez 3D pozadine)" title={lite ? 'Lagani način je uključen' : 'Lagani način: isključi 3D pozadinu'}>
+									<button type="button" className="icon-btn" onClick={toggleLite} aria-pressed={lite} aria-label={t('top.lite')} title={lite ? t('top.liteOn') : t('top.liteOff')}>
 										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">
 											{lite ? <path d="M8 2l5 2.8v5.4L8 13 3 10.2V4.8L8 2z" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinejoin="round" /> : <path d="M8 2l5 2.8v5.4L8 13 3 10.2V4.8L8 2zM8 7.9V13M3 4.8l5 3.1 5-3.1" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinejoin="round" />}
 										</svg>
 									</button>
 								)}
-								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label="Osvježi" disabled={loading}>
+								<button className={`icon-btn ${loading ? 'is-spinning' : ''}`} onClick={() => load(true)} aria-label={t('top.refresh')} disabled={loading}>
 									<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9M13.5 2.5V5h-2.5" stroke="currentColor" strokeWidth="1.6" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 								</button>
 								{DIRECT && getMerlin() && (
-									<button className="icon-btn" onClick={() => { signOut(); setSessions([]); setData(undefined); setAuth('merlin'); }} aria-label="Odjava i brisanje tokena" title="Odjava (briše tokene svih godina iz ovog preglednika)">
+									<button className="icon-btn" onClick={() => { signOut(); setSessions([]); setData(undefined); setAuth('merlin'); }} aria-label={t('top.signOut')} title={t('top.signOutTitle')}>
 										<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M6 2H3v12h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 									</button>
 								)}
@@ -229,12 +232,12 @@ export default function App() {
 							{error && data && (
 								<motion.div className="toast glass" role="alert" initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
 									{error}
-									{data ? ' Prikazujem zadnje spremljene podatke.' : ''}
-									<button className="link" onClick={() => load(true)}>Pokušaj ponovo</button>
+									{data ? t('toast.cached') : ''}
+									<button className="link" onClick={() => load(true)}>{t('retry')}</button>
 								</motion.div>
 							)}
 						</AnimatePresence>
-						{data?.errors && data.errors.length > 0 && <p className="partial muted small">Dio podataka nije stigao iz Merlina ({partWords(data.errors)}).</p>}
+						{data?.errors && data.errors.length > 0 && <p className="partial muted small">{t('partial', { parts: partWords(data.errors) })}</p>}
 
 						<main className="main">
 							{!data ? (
@@ -250,7 +253,7 @@ export default function App() {
 								</AnimatePresence>
 							)}
 						</main>
-						<footer className="foot muted small">Samo čita iz Merlina · bodovi se osvježavaju najviše svakih 15 minuta, ostalo svakih 5</footer>
+						<footer className="foot muted small">{t('foot')}</footer>
 					</motion.div>
 				)}
 			</div>
@@ -263,9 +266,9 @@ function ErrorState({ message, onRetry }: { message: string; onRetry: () => void
 	return (
 		<div className="page">
 			<div className="glass errorstate" role="alert">
-				<h1>Podaci se nisu učitali</h1>
+				<h1>{t('loadFailed')}</h1>
 				<p className="muted">{message}</p>
-				<button className="btn" onClick={onRetry} type="button">Pokušaj ponovo</button>
+				<button className="btn" onClick={onRetry} type="button">{t('retry')}</button>
 			</div>
 		</div>
 	);
@@ -295,8 +298,9 @@ function NoKey() {
 		<motion.div className="nokey" initial={{ opacity: 0, y: 20, filter: 'blur(10px)' }} animate={{ opacity: 1, y: 0, filter: 'blur(0px)' }} transition={{ delay: 1, ...spring }}>
 			<div className="glass nokey__card">
 				<h1><Wordmark className="wordmark--xl" /></h1>
-				<p className="muted">Ovaj server je javan, pa traži tvoj link s ključem (onaj s <code>#key=</code> na kraju). Otvori ga jednom i ovaj preglednik će ga zapamtiti.</p>
-				<a className="btn" href="?demo">Pogledaj demo</a>
+				<p className="muted"><Rich text={t('nokey.a')} /></p>
+				<a className="btn" href="?demo">{t('nokey.demo')}</a>
+				<LangToggle />
 			</div>
 		</motion.div>
 	);

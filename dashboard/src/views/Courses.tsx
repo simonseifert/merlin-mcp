@@ -2,6 +2,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import type { DashCourse, Dashboard } from '../types';
 import { Bar, Empty, Glass, Ring, Sheet, listVariants, usePageHeading } from '../components/ui';
+import { locale, t } from '../i18n';
 import { courseColor, courseHeadline, coursePercent, fmtDate, gradedSoFar, gradesFailed, nfmt, shortCourse } from '../format';
 
 type Sort = 'name' | 'points';
@@ -13,22 +14,22 @@ export default function Courses({ data, onRetry }: { data: Dashboard; onRetry: (
 	const heading = usePageHeading<HTMLHeadingElement>();
 	const [sort, setSort] = useState<Sort>('points');
 	const names = data.courses.map((c) => c.name);
-	const list = [...data.courses].sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name, 'hr') : (coursePercent(b) ?? -1) - (coursePercent(a) ?? -1)));
+	const list = [...data.courses].sort((a, b) => (sort === 'name' ? a.name.localeCompare(b.name, locale()) : (coursePercent(b) ?? -1) - (coursePercent(a) ?? -1)));
 
 	return (
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1 ref={heading} tabIndex={-1}>Predmeti</h1>
+					<h1 ref={heading} tabIndex={-1}>{t('co.title')}</h1>
 					<p className="muted">
-						Bodovi iz Merlina, akademska godina {data.year}
+						{t('co.sub', { year: data.year })}
 					</p>
 				</div>
-				<div className="segmented segmented--small">
+				<div className="segmented segmented--small" role="group" aria-label={t('co.sortAria')}>
 					{(['points', 'name'] as Sort[]).map((s) => (
-						<button key={s} className={sort === s ? 'is-active' : ''} onClick={() => setSort(s)}>
+						<button key={s} type="button" className={sort === s ? 'is-active' : ''} onClick={() => setSort(s)} aria-pressed={sort === s}>
 							{sort === s && <motion.span layoutId="sort-pill" className="segmented__pill" />}
-							<span>{s === 'points' ? 'Po bodovima' : 'Po imenu'}</span>
+							<span>{s === 'points' ? t('co.sortPoints') : t('co.sortName')}</span>
 						</button>
 					))}
 				</div>
@@ -36,7 +37,7 @@ export default function Courses({ data, onRetry }: { data: Dashboard; onRetry: (
 
 			{list.length === 0 ? (
 				<Glass>
-					<Empty title="Nema upisanih predmeta">Merlin za ovu godinu nije vratio nijedan kolegij.</Empty>
+					<Empty title={t('co.none')}>{t('co.noneHint')}</Empty>
 				</Glass>
 			) : (
 				<motion.div className="grid grid--courses" layout>
@@ -57,7 +58,7 @@ export default function Courses({ data, onRetry }: { data: Dashboard; onRetry: (
 								<div className="course__stats">
 									<div>
 										{courseHeadline(c).value === '–' ? (
-											<span className="muted">{c.error || (failedAll && c.items.length === 0) ? 'Bodovi se nisu učitali.' : 'Još nema bodova'}</span>
+											<span className="muted">{c.error || (failedAll && c.items.length === 0) ? t('co.gradesFailed') : t('co.noPoints')}</span>
 										) : (
 											<>
 												<span className="num big">{courseHeadline(c).value}</span>
@@ -67,7 +68,7 @@ export default function Courses({ data, onRetry }: { data: Dashboard; onRetry: (
 									</div>
 									{sofar.count > 0 && c.total?.raw !== undefined && (
 										<span className="pill">
-											{nfmt(sofar.percent, 0)}% od ocijenjenog
+											{t('co.ofGradedPill', { n: nfmt(sofar.percent, 0) })}
 										</span>
 									)}
 								</div>
@@ -76,7 +77,7 @@ export default function Courses({ data, onRetry }: { data: Dashboard; onRetry: (
 										<motion.span key={k} initial={{ scaleY: 0 }} animate={{ scaleY: 1 }} transition={{ delay: 0.3 + k * 0.04, type: 'spring', stiffness: 200, damping: 20 }} style={{ height: `${Math.max(8, i.percent ?? 0)}%`, background: color }} />
 									))}
 								</div>
-								{c.error && c.items.length > 0 && <p className="small warn">Bodovi se nisu osvježili.</p>}
+								{c.error && c.items.length > 0 && <p className="small warn">{t('co.gradesStale')}</p>}
 							</Glass>
 						);
 					})}
@@ -99,38 +100,38 @@ function CourseDetail({ c, color, failed, onRetry }: { c: DashCourse; color: str
 	return (
 		<div className="detail">
 			<div className="detail__summary">
-				<Ring value={coursePercent(c)} color={color} size={120} stroke={11} name="Ukupno" />
+				<Ring value={coursePercent(c)} color={color} size={120} stroke={11} name={t('co.total')} />
 				<div className="detail__nums">
 					<div>
-						<span className="muted small">Ukupno</span>
+						<span className="muted small">{t('co.total')}</span>
 						<strong className="num big">
 							{nfmt(c.total?.raw)}
 							{c.total?.max ? <span className="muted"> / {nfmt(c.total.max, 0)}</span> : null}
 						</strong>
 					</div>
 					<div>
-						<span className="muted small">Od ocijenjenog</span>
+						<span className="muted small">{t('co.sofar')}</span>
 						<strong className="num">
 							{sofar.max ? `${nfmt(sofar.raw)} / ${nfmt(sofar.max)}` : `${nfmt(sofar.percent, 0)}%`}
 						</strong>
 					</div>
 					<div>
-						<span className="muted small">Ocijenjenih stavki</span>
+						<span className="muted small">{t('co.gradedCount')}</span>
 						<strong className="num">{sofar.count}</strong>
 					</div>
 				</div>
 			</div>
 			{c.items.length === 0 && failed ? (
-				<Empty title="Bodovi se nisu učitali.">
-					<button type="button" className="link" onClick={onRetry}>Pokušaj ponovo</button>
+				<Empty title={t('co.gradesFailed')}>
+					<button type="button" className="link" onClick={onRetry}>{t('retry')}</button>
 				</Empty>
 			) : c.items.length === 0 ? (
-				<Empty title="Još nema ocjena">Profesor još nije unio bodove u Merlin.</Empty>
+				<Empty title={t('co.noGrades')}>{t('co.noGradesHint')}</Empty>
 			) : (
 				<div className="items">
 					{failed && (
 						<p className="small warn" role="status">
-							Bodovi se nisu osvježili, prikazujem zadnje spremljene. <button type="button" className="link" onClick={onRetry}>Pokušaj ponovo</button>
+							{t('co.gradesStaleDetail')} <button type="button" className="link" onClick={onRetry}>{t('retry')}</button>
 						</p>
 					)}
 					{c.items.map((i, k) => (
@@ -144,8 +145,8 @@ function CourseDetail({ c, color, failed, onRetry }: { c: DashCourse; color: str
 							</div>
 							<Bar value={i.percent ?? (i.raw !== undefined && i.max ? (i.raw / i.max) * 100 : undefined)} color={color} label={i.name} />
 							<div className="item__meta muted small">
-								{i.weight && <span>Težina {i.weight}</span>}
-								{i.graded_at ? <span>Ocijenjeno {fmtDate(i.graded_at)}</span> : null}
+								{i.weight && <span>{t('co.weight', { w: i.weight })}</span>}
+								{i.graded_at ? <span>{t('co.gradedAt', { date: fmtDate(i.graded_at) })}</span> : null}
 							</div>
 							{i.feedback && <blockquote className="item__feedback">{i.feedback}</blockquote>}
 						</motion.div>

@@ -6,6 +6,7 @@
  */
 
 import { createClient, isAuthError, MerlinError, MERLIN_ORIGIN } from './merlin';
+import { t } from '../i18n';
 
 const MERLIN = 'marlon.merlin';
 const LAST = 'marlon.last';
@@ -153,7 +154,7 @@ export function extractToken(input: string): string | null {
 }
 
 // Auto-return (desktop): we register a handler for a `web+…` scheme, tell Moodle to redirect the token
-// to it, and the browser bounces it back to our own page — no copy. iOS/Safari ignore this and fall
+// to it, and the browser bounces it back to our own page : no copy. iOS/Safari ignore this and fall
 // back to the copy flow; both carry the token the same way, so extractToken handles either.
 const PROTO = 'web+marlon';
 const PENDING_YEAR = 'marlon.pendingYear';
@@ -233,8 +234,8 @@ export async function signIn(token: string, year: string): Promise<MerlinSession
 		setMerlin(s);
 		return s;
 	} catch (err) {
-		if (isAuthError(err)) throw new Error('Token nije prihvaćen. Provjeri da je za točnu godinu i da nije istekao.');
-		if ((err as MerlinError).retryAfterS !== undefined) throw new Error('Merlin je zatražio pauzu. Pokušaj za koju minutu.');
-		throw err instanceof Error ? err : new Error('Prijava nije uspjela.');
+		if (isAuthError(err)) throw new Error(t('li.errRejected'));
+		if ((err as MerlinError).retryAfterS !== undefined) throw new Error(t('li.errPause'));
+		throw err instanceof Error ? err : new Error(t('err.login'));
 	}
 }

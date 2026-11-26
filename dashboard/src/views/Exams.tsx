@@ -2,6 +2,7 @@ import { motion } from 'motion/react';
 import { useState } from 'react';
 import type { Dashboard } from '../types';
 import { CardTitle, Dot, Empty, Glass, KindBadge, MerlinLink, listVariants, useNow, usePageHeading } from '../components/ui';
+import { t } from '../i18n';
 import { courseColor, fmtDate, fmtDayNum, fmtMonthShort, fmtTime, relative, shortCourse } from '../format';
 
 
@@ -24,22 +25,22 @@ export default function Exams({ data }: { data: Dashboard }) {
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1 ref={heading} tabIndex={-1}>Ispiti i seminari</h1>
-					<p className="muted">Ispiti iz Merlin kalendara, seminari iz zadaća i najave profesora</p>
+					<h1 ref={heading} tabIndex={-1}>{t('ex.title')}</h1>
+					<p className="muted">{t('ex.sub')}</p>
 				</div>
 				<label className="toggle">
 					<input type="checkbox" checked={showPast} onChange={(e) => setShowPast(e.target.checked)} />
 					<span className="toggle__track"><span className="toggle__thumb" /></span>
-					<span className="small">Prikaži prošle</span>
+					<span className="small">{t('ex.showPast')}</span>
 				</label>
 			</motion.header>
 
 			<div className="grid grid--exams">
 				<Glass className="exams">
-					<CardTitle aside={<span className="pill">{exams.length}</span>}>Ispiti</CardTitle>
+					<CardTitle aside={<span className="pill">{exams.length}</span>}>{t('ex.exams')}</CardTitle>
 					{exams.length === 0 ? (
-						<Empty title={showPast ? 'Nema ispita u kalendaru' : 'Nema nadolazećih ispita'}>
-							Merlin ne označava ispite posebno: ovdje su događaji s riječima poput „ispit”, „kolokvij” ili „međuispit” u nazivu.
+						<Empty title={showPast ? t('ex.noExams') : t('ex.noUpcoming')}>
+							{t('ex.noExamsHint')}
 						</Empty>
 					) : (
 						<div className="exam-list">
@@ -73,9 +74,9 @@ export default function Exams({ data }: { data: Dashboard }) {
 				</Glass>
 
 				<Glass className="seminars">
-					<CardTitle aside={<span className="pill">{seminars.length}</span>}>Seminari i projekti</CardTitle>
+					<CardTitle aside={<span className="pill">{seminars.length}</span>}>{t('ex.seminars')}</CardTitle>
 					{seminars.length === 0 ? (
-						<Empty title={showPast ? 'Nema seminara' : 'Nema nadolazećih seminara'}>Ovdje se pojavljuju zadaće sa „seminar”, „esej”, „projekt” ili „prezentacija” u nazivu.</Empty>
+						<Empty title={showPast ? t('ex.noSeminars') : t('ex.noUpcomingSem')}>{t('ex.noSeminarsHint')}</Empty>
 					) : (
 						<div className="sem-list">
 							{seminars.map((s, i) => (
@@ -86,7 +87,7 @@ export default function Exams({ data }: { data: Dashboard }) {
 									</div>
 									<span className="muted small">
 										<Dot color={color(s.course)} /> {shortCourse(s.course)}
-										{s.due ? ` · rok ${fmtDate(s.due)} u ${fmtTime(s.due)}` : ' · bez roka'}
+										{s.due ? t('ex.due', { date: fmtDate(s.due), time: fmtTime(s.due) }) : t('ex.noDue')}
 									</span>
 									{s.intro && <p className="small muted clamp-3">{s.intro}</p>}
 								</motion.article>
@@ -96,9 +97,9 @@ export default function Exams({ data }: { data: Dashboard }) {
 				</Glass>
 
 				<Glass className="span-2 announce">
-					<CardTitle>Najave profesora</CardTitle>
+					<CardTitle>{t('ex.announce')}</CardTitle>
 					{news.length === 0 ? (
-						<Empty title="Nema najava">U obavijestima zadnjih 45 dana nema spomena ispita ni seminara.</Empty>
+						<Empty title={t('ex.noAnnounce')}>{t('ex.noAnnounceHint')}</Empty>
 					) : (
 						<div className="news__list news__list--wide">
 							{news.map((a) => (

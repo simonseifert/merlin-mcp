@@ -1,5 +1,6 @@
 import type { DashAnnouncements, Dashboard, DashGrades } from './types';
 import { demoDashboard } from './demo';
+import { t } from './i18n';
 import { buildAnnouncements, buildGrades, buildMain } from '../../src/dashboard-build';
 import { createClient, isAuthError, type DirectClient } from './direct/merlin';
 import { getMerlin, type MerlinSession } from './direct/session';
@@ -104,7 +105,7 @@ async function buildPartDirect<T>(part: PartName, fresh: boolean): Promise<T> {
 		return data;
 	} catch (err) {
 		if (isAuthError(err)) throw new AuthError('merlin');
-		if ((err as { retryAfterS?: number }).retryAfterS !== undefined) throw new Error('Merlin traži malo pauze. Probaj opet za minutu.');
+		if ((err as { retryAfterS?: number }).retryAfterS !== undefined) throw new Error(t('err.rate'));
 		throw err;
 	}
 }
@@ -114,8 +115,8 @@ async function fetchPart<T>(part: PartName, fresh: boolean): Promise<T> {
 	const key = getKey();
 	const res = await fetch(`/api/dashboard?part=${part}${fresh ? '&fresh=1' : ''}`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, cache: 'no-store' });
 	if (res.status === 401) throw new AuthError('key');
-	if (res.status === 429) throw new Error('Merlin traži malo pauze. Probaj opet za minutu.');
-	if (!res.ok) throw new Error(`Server je vratio ${res.status}`);
+	if (res.status === 429) throw new Error(t('err.rate'));
+	if (!res.ok) throw new Error(t('err.server', { n: res.status }));
 	return (await res.json()) as T;
 }
 

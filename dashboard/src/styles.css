@@ -1346,6 +1346,18 @@ a:focus-visible,
 	outline-offset: 2px;
 }
 
+.lang-btn {
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: var(--text);
+}
+.login__lang {
+	position: absolute;
+	top: max(14px, env(safe-area-inset-top));
+	right: 14px;
+}
+
 /* academic year switcher (direct mode) */
 .year-select {
 	appearance: none;
