@@ -1,5 +1,6 @@
 import type { DashAnnouncements, Dashboard, DashGrades } from './types';
 import { demoDashboard } from './demo';
+import { t } from './i18n';
 import { buildAnnouncements, buildGrades, buildMain, configureClassification } from '../../src/dashboard-build';
 import { createClient, isAuthError, type DirectClient } from './direct/merlin';
 import { getMerlin, type MerlinSession } from './direct/session';
@@ -51,10 +52,16 @@ export function getKey(): string | undefined {
 
 // ---------- the dashboard ----------
 
+/** The saved page: per year in direct mode (each year is its own site), one copy otherwise. */
+const lastKey = (): string => {
+	const year = DIRECT ? getMerlin()?.year : undefined;
+	return year ? `${LAST}.${year}` : LAST;
+};
+
 export function lastDashboard(): Dashboard | undefined {
 	if (isDemo()) return demoDashboard();
 	try {
-		const raw = localStorage.getItem(LAST);
+		const raw = localStorage.getItem(lastKey());
 		return raw ? (JSON.parse(raw) as Dashboard) : undefined;
 	} catch {
 		return undefined;
@@ -78,7 +85,7 @@ function directClient(s: MerlinSession): DirectClient {
 async function buildPartDirect<T>(part: PartName, fresh: boolean): Promise<T> {
 	const s = getMerlin();
 	if (!s) throw new AuthError('merlin');
-	const key = `marlon.part.${part}`;
+	const key = `marlon.part.${s.year}.${part}`;
 	if (!fresh) {
 		try {
 			const hit = JSON.parse(localStorage.getItem(key) ?? 'null') as { at: number; year: string; data: T } | null;
@@ -100,7 +107,7 @@ async function buildPartDirect<T>(part: PartName, fresh: boolean): Promise<T> {
 		return data;
 	} catch (err) {
 		if (isAuthError(err)) throw new AuthError('merlin');
-		if ((err as { retryAfterS?: number }).retryAfterS !== undefined) throw new Error('Merlin traži malo pauze. Probaj opet za minutu.');
+		if ((err as { retryAfterS?: number }).retryAfterS !== undefined) throw new Error(t('err.rate'));
 		throw err;
 	}
 }
@@ -110,8 +117,8 @@ async function fetchPart<T>(part: PartName, fresh: boolean): Promise<T> {
 	const key = getKey();
 	const res = await fetch(`/api/dashboard?part=${part}${fresh ? '&fresh=1' : ''}`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, cache: 'no-store' });
 	if (res.status === 401) throw new AuthError('key');
-	if (res.status === 429) throw new Error('Merlin traži malo pauze. Probaj opet za minutu.');
-	if (!res.ok) throw new Error(`Server je vratio ${res.status}`);
+	if (res.status === 429) throw new Error(t('err.rate'));
+	if (!res.ok) throw new Error(t('err.server', { n: res.status }));
 	return (await res.json()) as T;
 }
 
@@ -150,6 +157,10 @@ export async function fetchDashboard(fresh = false, onUpdate: (d: Dashboard) => 
 		return d;
 	}
 	const prev = lastDashboard();
+	const saveKey = lastKey();
+	// A year switch (or sign-out) mid-load: this run must not paint over the new page.
+	const year = getMerlin()?.year;
+	const stale = () => DIRECT && getMerlin()?.year !== year;
 	const parts: Parts = {};
 	const failed: Array<{ part: string; error: string }> = [];
 	let current: Dashboard | undefined;
@@ -157,6 +168,7 @@ export async function fetchDashboard(fresh = false, onUpdate: (d: Dashboard) => 
 		// Until main lands, side parts only update the saved copy's points or announcements.
 		const merged = mergeParts(parts, prev, failed);
 		if (!merged || (!parts.main && !prev)) return;
+		if (stale()) return;
 		current = merged;
 		onUpdate(merged);
 	};
@@ -175,7 +187,7 @@ export async function fetchDashboard(fresh = false, onUpdate: (d: Dashboard) => 
 	await Promise.all(side);
 	const done = current ?? mergeParts(parts, prev, failed)!;
 	try {
-		localStorage.setItem(LAST, JSON.stringify(done));
+		if (!stale()) localStorage.setItem(saveKey, JSON.stringify(done));
 	} catch {
 		/* full or private: fine */
 	}

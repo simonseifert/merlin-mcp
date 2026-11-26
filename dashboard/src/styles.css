@@ -4,7 +4,8 @@
 	--font: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'SF Pro Text', 'Inter', 'Segoe UI', system-ui, sans-serif;
 	--bg: #eef0f6;
 	--text: #1d1d1f;
-	--muted: rgba(60, 60, 67, 0.62);
+	--muted: #46464f;
+	--link: #0060d0;
 	--line: rgba(255, 255, 255, 0.7);
 	--hair: rgba(60, 60, 67, 0.1);
 	--glass: rgba(255, 255, 255, 0.52);
@@ -25,7 +26,8 @@
 .is-dark {
 	--bg: #07080c;
 	--text: #f5f5f7;
-	--muted: rgba(235, 235, 245, 0.6);
+	--muted: rgba(235, 235, 245, 0.78);
+	--link: #5cb0ff;
 	--line: rgba(255, 255, 255, 0.14);
 	--hair: rgba(255, 255, 255, 0.08);
 	--glass: rgba(28, 28, 36, 0.48);
@@ -330,12 +332,21 @@ code {
 .link {
 	border: 0;
 	background: none;
-	color: var(--blue);
+	color: var(--link);
 	cursor: pointer;
 	font-size: 14px;
 	font-weight: 520;
-	padding: 0;
-	margin-left: 8px;
+	padding: 4px 6px;
+	margin-left: 4px;
+	min-height: 28px;
+	display: inline-flex;
+	align-items: center;
+	text-decoration: none;
+	border-radius: 8px;
+}
+a.link:hover,
+button.link:hover {
+	text-decoration: underline;
 }
 
 /* ---------- type ---------- */
@@ -1335,6 +1346,138 @@ a:focus-visible,
 	outline-offset: 2px;
 }
 
+.lang-btn {
+	font-size: 12px;
+	font-weight: 700;
+	letter-spacing: 0.04em;
+	color: var(--text);
+}
+.login__lang {
+	position: absolute;
+	top: max(14px, env(safe-area-inset-top));
+	right: 14px;
+}
+
+/* academic year switcher (direct mode) */
+.year-select {
+	appearance: none;
+	-webkit-appearance: none;
+	height: 36px;
+	padding: 0 30px 0 14px;
+	border-radius: 999px;
+	border: 1px solid var(--line);
+	background-color: var(--glass);
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%23888' stroke-width='1.6' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+	background-repeat: no-repeat;
+	background-position: right 12px center;
+	-webkit-backdrop-filter: blur(20px) saturate(180%);
+	backdrop-filter: blur(20px) saturate(180%);
+	box-shadow: var(--shadow), var(--inner);
+	color: var(--text);
+	font: inherit;
+	font-size: 13px;
+	font-weight: 560;
+	cursor: pointer;
+}
+.year-select option {
+	color: #1d1d1f;
+}
+@media (pointer: coarse) {
+	.year-select {
+		height: 44px;
+	}
+}
+
+/* ---------- past things ---------- */
+.is-past,
+.cell--past:not(.cell--sel) {
+	opacity: 0.55;
+}
+.cell--past.cell--sel .cell__num {
+	opacity: 0.7;
+}
+.countdown-chip--past {
+	background: var(--hair);
+	color: var(--muted);
+}
+.link--merlin {
+	margin: 4px 0 0 -6px;
+	justify-self: start;
+	font-size: 13px;
+}
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* ---------- accessibility ---------- */
+/* A real button (or link) stretched over a clickable card. */
+.glass__hit {
+	position: absolute;
+	inset: 0;
+	z-index: 2;
+	display: block;
+	width: 100%;
+	height: 100%;
+	padding: 0;
+	margin: 0;
+	border: 0;
+	border-radius: inherit;
+	background: none;
+	cursor: pointer;
+	-webkit-tap-highlight-color: transparent;
+}
+.glass__hit:focus-visible {
+	outline: 3px solid var(--blue);
+	outline-offset: -3px;
+}
+h1:focus,
+.sheet:focus {
+	outline: none;
+}
+.errorstate {
+	max-width: 480px;
+	margin: 12vh auto 0;
+	text-align: center;
+	display: grid;
+	gap: 14px;
+	justify-items: center;
+}
+.errorstate h1 {
+	margin: 0;
+	font-size: 26px;
+	letter-spacing: -0.03em;
+}
+.errorstate p {
+	margin: 0;
+}
+.segmented button {
+	min-height: 32px;
+}
+/* Touch targets: 44px where the pointer is a finger. */
+@media (pointer: coarse) {
+	.segmented button,
+	.chip,
+	.btn-soft,
+	.link {
+		min-height: 44px;
+	}
+	.icon-btn {
+		width: 44px;
+		height: 44px;
+	}
+	.link {
+		padding: 8px 10px;
+	}
+}
+
 /* ---------- responsive ---------- */
 @media (max-width: 1020px) {
 	.grid--overview {
@@ -1355,8 +1498,21 @@ a:focus-visible,
 		padding: 12px 14px 110px;
 	}
 	.topbar {
-		grid-template-columns: 1fr auto;
+		display: flex;
+		flex-wrap: wrap;
+		justify-content: space-between;
+		align-items: center;
+		gap: 10px;
 		top: 10px;
+	}
+	/* The controls stay in one row; when they do not fit beside the logo the whole row drops below it. */
+	.topbar__right {
+		flex-wrap: nowrap;
+		gap: 8px;
+		margin-left: auto;
+	}
+	.year-select {
+		padding: 0 26px 0 12px;
 	}
 	/* Nav becomes a floating tab bar at the bottom, like iOS. */
 	.nav {
@@ -1454,6 +1610,11 @@ a:focus-visible,
 	place-items: center;
 	background: var(--bg);
 	overflow: hidden;
+	cursor: pointer;
+}
+.icon-btn[aria-pressed='true'] {
+	background: var(--glass-strong);
+	color: var(--link);
 }
 .intro::after {
 	/* a soft blue glow behind the stage */

@@ -1,11 +1,13 @@
 import { motion } from 'motion/react';
 import type { Dashboard } from '../types';
 import type { Route } from '../routes';
-import { Bar, CardTitle, Dot, Empty, Glass, KindBadge, Ring, listVariants, useNow } from '../components/ui';
-import { countdown, courseColor, courseHeadline, coursePercent, dayKey, gradedSoFar, fmtDay, fmtDayLong, fmtTime, greeting, nfmt, plural, relative, shortCourse } from '../format';
+import { Bar, CardTitle, Dot, Empty, Glass, KindBadge, Ring, listVariants, useNow, usePageHeading } from '../components/ui';
+import { countdown, courseColor, courseHeadline, coursePercent, dayKey, gradedSoFar, fmtDay, fmtDayLong, fmtTime, greeting, relative, shortCourse } from '../format';
+import { t, tn } from '../i18n';
 
 export default function Overview({ data, go }: { data: Dashboard; go: (r: Route) => void }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const names = data.courses.map((c) => c.name);
 	const color = (n?: string) => courseColor(n, names);
 	const upcoming = data.events.filter((e) => e.start + (e.duration ?? 0) >= now);
@@ -27,19 +29,19 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 				<motion.p className="hero__eyebrow" variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
 					{fmtDayLong(now)}
 				</motion.p>
-				<motion.h1 variants={{ hidden: { opacity: 0, y: 16, filter: 'blur(10px)' }, show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } } }}>
+				<motion.h1 ref={heading} tabIndex={-1} variants={{ hidden: { opacity: 0, y: 16, filter: 'blur(10px)' }, show: { opacity: 1, y: 0, filter: 'blur(0px)', transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } } }}>
 					{greeting()}
 					{first ? `, ${first}` : ''}.
 				</motion.h1>
 				<motion.p className="hero__sub" variants={{ hidden: { opacity: 0, y: 8 }, show: { opacity: 1, y: 0 } }}>
-					{week.length === 0 ? 'Ovaj tjedan je miran.' : `Ovaj tjedan: ${week.length} ${plural(week.length, 'stavka', 'stavke', 'stavki')}`}
-					{nextExam ? ` · sljedeći ispit ${relative(nextExam.start, now)}` : ''}
+					{week.length === 0 ? t('ov.quiet') : t('ov.week', { items: tn('n.items', week.length) })}
+					{nextExam ? t('ov.nextExamSub', { when: relative(nextExam.start, now) }) : ''}
 				</motion.p>
 			</motion.header>
 
 			<div className="grid grid--overview">
-				<Glass className="span-2 next-exam" interactive onClick={() => go('ispiti')} style={nextExam ? ({ '--accent': color(nextExam.course) } as React.CSSProperties) : undefined}>
-					<CardTitle aside={nextExam && <KindBadge kind="exam" />}>Sljedeći ispit</CardTitle>
+				<Glass className="span-2 next-exam" hit={{ label: t('ov.openExams'), href: '#/ispiti', onClick: () => go('ispiti') }} style={nextExam ? ({ '--accent': color(nextExam.course) } as React.CSSProperties) : undefined}>
+					<CardTitle aside={nextExam && <KindBadge kind="exam" />}>{t('ov.nextExam')}</CardTitle>
 					{nextExam ? (
 						<div className="next-exam__body">
 							<div>
@@ -55,26 +57,26 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 							<Countdown at={nextExam.start} now={now} />
 						</div>
 					) : (
-						<Empty title="Nema ispita na vidiku">U Merlin kalendaru nema ispita za sljedeća 4 mjeseca.</Empty>
+						<Empty title={t('ov.noExam')}>{t('ov.noExamHint')}</Empty>
 					)}
 				</Glass>
 
-				<Glass className="avg" interactive onClick={() => go('predmeti')}>
-					<CardTitle>Uspješnost</CardTitle>
+				<Glass className="avg" hit={{ label: t('ov.openCourses'), href: '#/predmeti', onClick: () => go('predmeti') }}>
+					<CardTitle>{t('ov.success')}</CardTitle>
 					<div className="avg__body">
-						<Ring value={avg} size={124} stroke={11} color="#5e5ce6" sub={`od ocijenjenog · ${graded.length} ${plural(graded.length, 'predmet', 'predmeta', 'predmeta')}`} />
+						<Ring value={avg} name={t('ov.success')} size={124} stroke={11} color="#5e5ce6" sub={t('ov.ofGraded', { courses: tn('n.courses', graded.length) })} />
 					</div>
 				</Glass>
 
 				<Glass className="span-2 row-2 week">
-					<CardTitle aside={<button className="link" onClick={() => go('kalendar')}>Kalendar →</button>}>Sljedećih 7 dana</CardTitle>
+					<CardTitle aside={<button type="button" className="link" onClick={() => go('kalendar')}>{t('ov.calendarLink')}</button>}>{t('ov.next7')}</CardTitle>
 					{week.length === 0 ? (
-						<Empty title="Ništa u kalendaru">Uživaj u slobodnom tjednu.</Empty>
+						<Empty title={t('ov.nothing')}>{t('ov.nothingHint')}</Empty>
 					) : (
 						<div className="agenda">
 							{[...days.entries()].map(([k, items]) => (
 								<div key={k} className="agenda__day">
-									<div className="agenda__date">{dayKey(now) === k ? 'Danas' : fmtDay(items[0].start)}</div>
+									<div className="agenda__date">{dayKey(now) === k ? t('ov.today') : fmtDay(items[0].start)}</div>
 									<div className="agenda__items">
 										{items.map((e) => (
 											<div key={e.key} className="agenda__item" style={{ '--accent': color(e.course) } as React.CSSProperties}>
@@ -96,8 +98,8 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 					)}
 				</Glass>
 
-				<Glass className="points" interactive onClick={() => go('predmeti')}>
-					<CardTitle>Bodovi</CardTitle>
+				<Glass className="points" hit={{ label: t('ov.openCourses'), href: '#/predmeti', onClick: () => go('predmeti') }}>
+					<CardTitle>{t('ov.points')}</CardTitle>
 					<div className="mini-courses">
 						{[...data.courses].sort((a, b) => (coursePercent(b) ?? -1) - (coursePercent(a) ?? -1)).slice(0, 5).map((c) => (
 							<div key={c.key} className="mini-course">
@@ -105,17 +107,17 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 									<span className="ellipsis">{shortCourse(c.name)}</span>
 									<span className="num">{courseHeadline(c).value}</span>
 								</div>
-								<Bar value={coursePercent(c)} color={color(c.name)} />
+								<Bar value={coursePercent(c)} color={color(c.name)} label={shortCourse(c.name)} />
 							</div>
 						))}
-						{data.courses.length === 0 && <Empty title="Nema predmeta" />}
+						{data.courses.length === 0 && <Empty title={t('ov.noCourses')} />}
 					</div>
 				</Glass>
 
 				<Glass className="span-2 news">
-					<CardTitle>Obavijesti</CardTitle>
+					<CardTitle>{t('ov.news')}</CardTitle>
 					{data.announcements.length === 0 ? (
-						<Empty title="Nema novih obavijesti">U zadnjih 45 dana nema novih objava.</Empty>
+						<Empty title={t('ov.noNews')}>{t('ov.noNewsHint')}</Empty>
 					) : (
 						<div className="news__list">
 							{data.announcements.slice(0, 3).map((a) => (
@@ -137,10 +139,10 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 					)}
 				</Glass>
 
-				<Glass className="seminars-mini" interactive onClick={() => go('ispiti')}>
-					<CardTitle>Seminari</CardTitle>
+				<Glass className="seminars-mini" hit={{ label: t('ov.openExams'), href: '#/ispiti', onClick: () => go('ispiti') }}>
+					<CardTitle>{t('ov.seminars')}</CardTitle>
 					{seminars.length === 0 ? (
-						<Empty title="Nema seminara" />
+						<Empty title={t('ov.noSeminars')} />
 					) : (
 						<div className="sem-mini">
 							{seminars.map((s) => (
@@ -148,7 +150,7 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 									<Dot color={color(s.course)} />
 									<div className="sem-mini__text">
 										<strong className="ellipsis">{s.title}</strong>
-										<span className="muted small">{s.due ? relative(s.due, now) : 'bez roka'}</span>
+										<span className="muted small">{s.due ? relative(s.due, now) : t('ov.noDue')}</span>
 									</div>
 								</div>
 							))}
@@ -163,15 +165,15 @@ export default function Overview({ data, go }: { data: Dashboard; go: (r: Route)
 function Countdown({ at, now }: { at: number; now: number }) {
 	const c = countdown(at, now);
 	const cells: Array<[number, string]> = [
-		[c.days, plural(c.days, 'dan', 'dana', 'dana')],
-		[c.hours, plural(c.hours, 'sat', 'sata', 'sati')],
-		[c.minutes, 'min'],
+		[c.days, tn('unit.day', c.days)],
+		[c.hours, tn('unit.hour', c.hours)],
+		[c.minutes, t('unit.min')],
 	];
 	return (
 		<div className="countdown">
 			{cells.map(([n, l], i) => (
 				<div key={i} className="countdown__cell">
-					<motion.span key={n} initial={{ y: -8, opacity: 0 }} animate={{ y: 0, opacity: 1 }}>
+					<motion.span key={n} initial={{ y: -8, opacity: 0 }} animate={{ opacity: 1, y: 0 }}>
 						{n}
 					</motion.span>
 					<small>{l}</small>

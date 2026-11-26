@@ -1,28 +1,33 @@
 import { AnimatePresence, motion } from 'motion/react';
 import { useMemo, useState } from 'react';
 import type { Dashboard, DashEvent, EventKind } from '../types';
-import { Dot, Empty, Glass, KindBadge, listVariants, spring, useNow } from '../components/ui';
-import { courseColor, dayKey, fmtDayLong, fmtMonth, fmtTime, shortCourse } from '../format';
+import { Dot, Empty, Glass, KindBadge, MerlinLink, listVariants, spring, useNow, usePageHeading } from '../components/ui';
+import { t, tn } from '../i18n';
+import { courseColor, dayKey, fmtDayLong, fmtMonth, fmtTime, shortCourse, weekdayNames } from '../format';
 
-const WEEKDAYS = ['Pon', 'Uto', 'Sri', 'Čet', 'Pet', 'Sub', 'Ned'];
-const FILTERS: Array<{ id: 'all' | EventKind; label: string }> = [
-	{ id: 'all', label: 'Sve' },
-	{ id: 'exam', label: 'Ispiti' },
-	{ id: 'seminar', label: 'Seminari' },
-	{ id: 'deadline', label: 'Rokovi' },
-	{ id: 'class', label: 'Nastava' },
+const filters = (): Array<{ id: 'all' | EventKind; label: string }> => [
+	{ id: 'all', label: t('cal.all') },
+	{ id: 'exam', label: t('cal.exams') },
+	{ id: 'seminar', label: t('cal.seminars') },
+	{ id: 'deadline', label: t('cal.deadlines') },
+	{ id: 'class', label: t('cal.classes') },
 ];
 
-/** Local-midnight Date for a yyyy-mm-dd key (the grid is built in the browser's calendar, keyed in Zagreb time). */
-const keyOf = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+/*
+ * The grid is built in UTC at noon, never in the browser's zone: a calendar day is just a yyyy-mm-dd key
+ * (the Zagreb day, from dayKey), so a phone in another time zone still shows the right day. Noon keeps
+ * every cell on the same date when it is formatted back in Europe/Zagreb.
+ */
+const utcDay = (y: number, m: number, d: number) => new Date(Date.UTC(y, m, d, 12));
+const keyOf = (d: Date) => `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
+const monthOf = (key: string) => utcDay(Number(key.slice(0, 4)), Number(key.slice(5, 7)) - 1, 1);
+const epoch = (d: Date) => Math.floor(d.getTime() / 1000);
 
 export default function Calendar({ data }: { data: Dashboard }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const todayKey = dayKey(now);
-	const [month, setMonth] = useState(() => {
-		const d = new Date();
-		return new Date(d.getFullYear(), d.getMonth(), 1);
-	});
+	const [month, setMonth] = useState(() => monthOf(todayKey));
 	const [dir, setDir] = useState(0);
 	const [selected, setSelected] = useState(todayKey);
 	const [filter, setFilter] = useState<'all' | EventKind>('all');
@@ -40,36 +45,36 @@ export default function Calendar({ data }: { data: Dashboard }) {
 
 	// Six Monday-first weeks around the month.
 	const cells = useMemo(() => {
-		const first = new Date(month);
-		const offset = (first.getDay() + 6) % 7;
-		const start = new Date(first.getFullYear(), first.getMonth(), 1 - offset);
-		return Array.from({ length: 42 }, (_, i) => new Date(start.getFullYear(), start.getMonth(), start.getDate() + i));
+		const y = month.getUTCFullYear();
+		const m = month.getUTCMonth();
+		const offset = (month.getUTCDay() + 6) % 7;
+		return Array.from({ length: 42 }, (_, i) => utcDay(y, m, 1 - offset + i));
 	}, [month]);
 
 	const shift = (n: number) => {
 		setDir(n);
-		setMonth((m) => new Date(m.getFullYear(), m.getMonth() + n, 1));
+		setMonth((m) => utcDay(m.getUTCFullYear(), m.getUTCMonth() + n, 1));
 	};
 	const today = () => {
-		const d = new Date();
 		setDir(0);
-		setMonth(new Date(d.getFullYear(), d.getMonth(), 1));
+		setMonth(monthOf(todayKey));
 		setSelected(todayKey);
 	};
 
 	const dayEvents = byDay.get(selected) ?? [];
-	const selDate = new Date(`${selected}T12:00:00`);
+	const selDate = utcDay(Number(selected.slice(0, 4)), Number(selected.slice(5, 7)) - 1, Number(selected.slice(8, 10)));
+	const selPast = selected < todayKey;
 
 	return (
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1>Kalendar</h1>
-					<p className="muted">Nastava, rokovi i ispiti iz Merlina za sljedeća 4 mjeseca</p>
+					<h1 ref={heading} tabIndex={-1}>{t('cal.title')}</h1>
+					<p className="muted">{t('cal.sub')}</p>
 				</div>
-				<div className="chips">
-					{FILTERS.map((f) => (
-						<button key={f.id} className={`chip ${filter === f.id ? 'is-active' : ''} ${f.id !== 'all' ? `chip--${f.id}` : ''}`} onClick={() => setFilter(f.id)}>
+				<div className="chips" role="group" aria-label={t('cal.filterAria')}>
+					{filters().map((f) => (
+						<button key={f.id} type="button" aria-pressed={filter === f.id} className={`chip ${filter === f.id ? 'is-active' : ''} ${f.id !== 'all' ? `chip--${f.id}` : ''}`} onClick={() => setFilter(f.id)}>
 							{f.label}
 						</button>
 					))}
@@ -81,23 +86,23 @@ export default function Calendar({ data }: { data: Dashboard }) {
 					<div className="month__head">
 						<h2 className="month__title">{fmtMonth(month)}</h2>
 						<div className="month__nav">
-							<button className="icon-btn" onClick={() => shift(-1)} aria-label="Prethodni mjesec">
-								<svg width="14" height="14" viewBox="0 0 14 14"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+							<button type="button" className="icon-btn" onClick={() => shift(-1)} aria-label={t('cal.prev')}>
+								<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M9 2L4 7l5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 							</button>
-							<button className="btn-soft" onClick={today}>Danas</button>
-							<button className="icon-btn" onClick={() => shift(1)} aria-label="Sljedeći mjesec">
-								<svg width="14" height="14" viewBox="0 0 14 14"><path d="M5 2l5 5-5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
+							<button type="button" className="btn-soft" onClick={today}>{t('cal.today')}</button>
+							<button type="button" className="icon-btn" onClick={() => shift(1)} aria-label={t('cal.next')}>
+								<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><path d="M5 2l5 5-5 5" stroke="currentColor" strokeWidth="1.8" fill="none" strokeLinecap="round" strokeLinejoin="round" /></svg>
 							</button>
 						</div>
 					</div>
-					<div className="month__weekdays">
-						{WEEKDAYS.map((w) => (
+					<div className="month__weekdays" aria-hidden="true">
+						{weekdayNames().map((w) => (
 							<span key={w}>{w}</span>
 						))}
 					</div>
 					<AnimatePresence mode="popLayout" initial={false} custom={dir}>
 						<motion.div
-							key={month.toISOString()}
+							key={keyOf(month)}
 							className="month__grid"
 							custom={dir}
 							initial={{ opacity: 0, x: dir * 40, filter: 'blur(6px)' }}
@@ -108,13 +113,22 @@ export default function Calendar({ data }: { data: Dashboard }) {
 							{cells.map((d) => {
 								const k = keyOf(d);
 								const evs = byDay.get(k) ?? [];
-								const inMonth = d.getMonth() === month.getMonth();
+								const inMonth = d.getUTCMonth() === month.getUTCMonth();
 								const hasExam = evs.some((e) => e.kind === 'exam');
+								const count = evs.length === 0 ? t('cal.noEvents') : tn('n.events', evs.length);
 								return (
-									<button key={k} className={`cell ${inMonth ? '' : 'cell--out'} ${k === todayKey ? 'cell--today' : ''} ${k === selected ? 'cell--sel' : ''} ${hasExam ? 'cell--exam' : ''}`} onClick={() => setSelected(k)}>
+									<button
+										key={k}
+										type="button"
+										className={`cell ${inMonth ? '' : 'cell--out'} ${k < todayKey ? 'cell--past' : ''} ${k === todayKey ? 'cell--today' : ''} ${k === selected ? 'cell--sel' : ''} ${hasExam ? 'cell--exam' : ''}`}
+										onClick={() => setSelected(k)}
+										aria-label={`${fmtDayLong(epoch(d))}, ${count}`}
+										aria-pressed={k === selected}
+										aria-current={k === todayKey ? 'date' : undefined}
+									>
 										{k === selected && <motion.span layoutId="cell-sel" className="cell__sel" transition={spring} />}
-										<span className="cell__num">{d.getDate()}</span>
-										<span className="cell__events">
+										<span className="cell__num" aria-hidden="true">{d.getUTCDate()}</span>
+										<span className="cell__events" aria-hidden="true">
 											{evs.slice(0, 3).map((e) => (
 												<span key={e.key} className={`cell__ev cell__ev--${e.kind}`} style={{ '--accent': courseColor(e.course, names) } as React.CSSProperties}>
 													<span className="cell__ev-text">{e.title}</span>
@@ -122,7 +136,7 @@ export default function Calendar({ data }: { data: Dashboard }) {
 											))}
 											{evs.length > 3 && <span className="cell__more">+{evs.length - 3}</span>}
 										</span>
-										<span className="cell__dots">
+										<span className="cell__dots" aria-hidden="true">
 											{evs.slice(0, 4).map((e) => (
 												<i key={e.key} style={{ background: courseColor(e.course, names) }} />
 											))}
@@ -137,14 +151,18 @@ export default function Calendar({ data }: { data: Dashboard }) {
 				<Glass className="day">
 					<AnimatePresence mode="wait">
 						<motion.div key={selected + filter} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.25 }}>
-							<p className="muted small upper">{selected === todayKey ? 'Danas' : 'Odabrani dan'}</p>
-							<h2 className="day__title">{fmtDayLong(Math.floor(selDate.getTime() / 1000))}</h2>
+							<p className="muted small upper">{selected === todayKey ? t('cal.dayToday') : selPast ? t('cal.dayPast') : t('cal.daySelected')}</p>
+							<h2 className="day__title">{fmtDayLong(epoch(selDate))}</h2>
 							{dayEvents.length === 0 ? (
-								<Empty title="Slobodan dan">Nema ničega u Merlin kalendaru.</Empty>
+								selPast ? (
+									<Empty title={t('cal.pastEmpty')}>{t('cal.pastEmptyHint')}</Empty>
+								) : (
+									<Empty title={t('cal.free')}>{t('cal.freeHint')}</Empty>
+								)
 							) : (
 								<div className="timeline">
 									{dayEvents.map((e) => (
-										<div key={e.key} className="timeline__item" style={{ '--accent': courseColor(e.course, names) } as React.CSSProperties}>
+										<div key={e.key} className={`timeline__item ${e.start + (e.duration ?? 0) < now ? 'is-past' : ''}`} style={{ '--accent': courseColor(e.course, names) } as React.CSSProperties}>
 											<div className="timeline__time">
 												<strong>{fmtTime(e.start)}</strong>
 												{e.duration ? <span className="muted small">{fmtTime(e.start + e.duration)}</span> : null}
@@ -155,10 +173,11 @@ export default function Calendar({ data }: { data: Dashboard }) {
 													<KindBadge kind={e.kind} />
 												</div>
 												<span className="muted small">
-													<Dot color={courseColor(e.course, names)} /> {shortCourse(e.course) || 'Osobni događaj'}
+													<Dot color={courseColor(e.course, names)} /> {shortCourse(e.course) || t('cal.personal')}
 													{e.location ? ` · ${e.location}` : ''}
 												</span>
 												{e.description && <p className="small muted clamp-3">{e.description}</p>}
+												<MerlinLink url={e.url} />
 											</div>
 										</div>
 									))}

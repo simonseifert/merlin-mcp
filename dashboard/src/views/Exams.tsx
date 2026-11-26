@@ -1,10 +1,10 @@
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import type { Dashboard } from '../types';
-import { CardTitle, Dot, Empty, Glass, KindBadge, listVariants, useNow } from '../components/ui';
-import { courseColor, fmtDate, fmtTime, relative, shortCourse } from '../format';
+import { CardTitle, Dot, Empty, Glass, KindBadge, MerlinLink, listVariants, useNow, usePageHeading } from '../components/ui';
+import { t } from '../i18n';
+import { courseColor, fmtDate, fmtDayNum, fmtMonthShort, fmtTime, relative, shortCourse } from '../format';
 
-const MONTHS = ['sij', 'velj', 'ožu', 'tra', 'svi', 'lip', 'srp', 'kol', 'ruj', 'lis', 'stu', 'pro'];
 
 function urgency(at: number, now: number): 'hot' | 'warm' | 'calm' {
 	const d = (at - now) / 86400;
@@ -13,6 +13,7 @@ function urgency(at: number, now: number): 'hot' | 'warm' | 'calm' {
 
 export default function Exams({ data }: { data: Dashboard }) {
 	const now = useNow();
+	const heading = usePageHeading<HTMLHeadingElement>();
 	const [showPast, setShowPast] = useState(false);
 	const names = data.courses.map((c) => c.name);
 	const color = (n?: string) => courseColor(n, names);
@@ -24,33 +25,33 @@ export default function Exams({ data }: { data: Dashboard }) {
 		<motion.div className="page" variants={listVariants} initial="hidden" animate="show" exit="hidden">
 			<motion.header className="page-head" variants={listVariants}>
 				<div>
-					<h1>Ispiti i seminari</h1>
-					<p className="muted">Ispiti iz Merlin kalendara, seminari iz zadaća i najave profesora</p>
+					<h1 ref={heading} tabIndex={-1}>{t('ex.title')}</h1>
+					<p className="muted">{t('ex.sub')}</p>
 				</div>
 				<label className="toggle">
 					<input type="checkbox" checked={showPast} onChange={(e) => setShowPast(e.target.checked)} />
 					<span className="toggle__track"><span className="toggle__thumb" /></span>
-					<span className="small">Prikaži prošle</span>
+					<span className="small">{t('ex.showPast')}</span>
 				</label>
 			</motion.header>
 
 			<div className="grid grid--exams">
 				<Glass className="exams">
-					<CardTitle aside={<span className="pill">{exams.length}</span>}>Ispiti</CardTitle>
+					<CardTitle aside={<span className="pill">{exams.length}</span>}>{t('ex.exams')}</CardTitle>
 					{exams.length === 0 ? (
-						<Empty title="Nema ispita u kalendaru">
-							Merlin ne označava ispite posebno: ovdje su događaji s riječima poput „ispit”, „kolokvij” ili „međuispit” u nazivu.
+						<Empty title={showPast ? t('ex.noExams') : t('ex.noUpcoming')}>
+							{t('ex.noExamsHint')}
 						</Empty>
 					) : (
 						<div className="exam-list">
 							{exams.map((e, i) => {
-								const d = new Date(e.start * 1000);
+								const past = e.start + (e.duration ?? 0) < now;
 								const u = urgency(e.start, now);
 								return (
-									<motion.div key={e.key} className={`exam exam--${u}`} style={{ '--accent': color(e.course) } as React.CSSProperties} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + i * 0.05, type: 'spring', stiffness: 220, damping: 26 }}>
+									<motion.div key={e.key} className={`exam exam--${u} ${past ? 'is-past' : ''}`} style={{ '--accent': color(e.course) } as React.CSSProperties} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.08 + i * 0.05, type: 'spring', stiffness: 220, damping: 26 }}>
 										<div className="exam__date">
-											<span className="exam__day">{d.getDate()}</span>
-											<span className="exam__month">{MONTHS[d.getMonth()]}</span>
+											<span className="exam__day">{fmtDayNum(e.start)}</span>
+											<span className="exam__month">{fmtMonthShort(e.start)}</span>
 										</div>
 										<div className="exam__body">
 											<strong>{e.title}</strong>
@@ -62,8 +63,9 @@ export default function Exams({ data }: { data: Dashboard }) {
 												{e.duration ? `–${fmtTime(e.start + e.duration)}` : ''}
 												{e.location ? ` · ${e.location}` : ''}
 											</span>
+											<MerlinLink url={e.url} />
 										</div>
-										<span className={`countdown-chip countdown-chip--${u}`}>{relative(e.start, now)}</span>
+										<span className={`countdown-chip countdown-chip--${past ? 'past' : u}`}>{relative(e.start, now)}</span>
 									</motion.div>
 								);
 							})}
@@ -72,20 +74,20 @@ export default function Exams({ data }: { data: Dashboard }) {
 				</Glass>
 
 				<Glass className="seminars">
-					<CardTitle aside={<span className="pill">{seminars.length}</span>}>Seminari i projekti</CardTitle>
+					<CardTitle aside={<span className="pill">{seminars.length}</span>}>{t('ex.seminars')}</CardTitle>
 					{seminars.length === 0 ? (
-						<Empty title="Nema seminara">Ovdje se pojavljuju zadaće sa „seminar”, „esej”, „projekt” ili „prezentacija” u nazivu.</Empty>
+						<Empty title={showPast ? t('ex.noSeminars') : t('ex.noUpcomingSem')}>{t('ex.noSeminarsHint')}</Empty>
 					) : (
 						<div className="sem-list">
 							{seminars.map((s, i) => (
-								<motion.article key={s.key} className="sem" style={{ '--accent': color(s.course) } as React.CSSProperties} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.05, type: 'spring', stiffness: 220, damping: 26 }}>
+								<motion.article key={s.key} className={`sem ${s.due && s.due < now ? 'is-past' : ''}`} style={{ '--accent': color(s.course) } as React.CSSProperties} initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 + i * 0.05, type: 'spring', stiffness: 220, damping: 26 }}>
 									<div className="sem__head">
 										<strong>{s.title}</strong>
-										{s.due && <span className={`countdown-chip countdown-chip--${urgency(s.due, now)}`}>{relative(s.due, now)}</span>}
+										{s.due && <span className={`countdown-chip countdown-chip--${s.due < now ? 'past' : urgency(s.due, now)}`}>{relative(s.due, now)}</span>}
 									</div>
 									<span className="muted small">
 										<Dot color={color(s.course)} /> {shortCourse(s.course)}
-										{s.due ? ` · rok ${fmtDate(s.due)} u ${fmtTime(s.due)}` : ' · bez roka'}
+										{s.due ? t('ex.due', { date: fmtDate(s.due), time: fmtTime(s.due) }) : t('ex.noDue')}
 									</span>
 									{s.intro && <p className="small muted clamp-3">{s.intro}</p>}
 								</motion.article>
@@ -95,9 +97,9 @@ export default function Exams({ data }: { data: Dashboard }) {
 				</Glass>
 
 				<Glass className="span-2 announce">
-					<CardTitle>Najave profesora</CardTitle>
+					<CardTitle>{t('ex.announce')}</CardTitle>
 					{news.length === 0 ? (
-						<Empty title="Nema najava">U obavijestima zadnjih 45 dana nema spomena ispita ni seminara.</Empty>
+						<Empty title={t('ex.noAnnounce')}>{t('ex.noAnnounceHint')}</Empty>
 					) : (
 						<div className="news__list news__list--wide">
 							{news.map((a) => (
