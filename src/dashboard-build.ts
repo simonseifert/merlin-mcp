@@ -18,9 +18,9 @@ export type EventKind = 'exam' | 'seminar' | 'deadline' | 'class' | 'event';
 // "Test" alone counts as an exam only when it is not a Moodle quiz (weekly quizzes are often called "Test 3").
 const EXAM =
 	/(\bispit(?:a|u|i|om|ni|na|no|ne|nog|nom|nih)?\b|\bkolokvij\w*|\bme[đd]u-?ispit\w*|\bparcijal\w*|\bprovjer\w* znanja|\bexam\w*|\bmid-?\s?term\w*|\bfinal exam\w*)/i;
-const TEST_WORD = /\btest\b/i;
+const TEST_WORD = /(?<![-\p{L}])test\b/iu; // not "t-test"
 const SEMINAR =
-	/(\bseminar\w*|\besej\w*|\bessay\w*|\bprezentacij\w*|\bpresentation\w*|\breferat\w*|\bprojekt(?:a|u|om)?\b|\bprojektn\w* (?:zadat\w*|rad\w*)|\bproject\b|\bcase stud\w*|\bstudij\w* slu[čc]aj\w*|\bposter\w*|\bterm paper\w*)/i;
+	/(\bseminar\w*|\besej\w*|\bessay\w*|\bprezentacij\w*|\bpresentation\w*|\breferat\w*|\bprojekt(?:a|u|om|i|e|ima)?\b|\bprojektn\w* (?:zadat\w*|rad\w*)|\bproject\b|\bcase stud\w*|\bstudij\w* slu[čc]aj\w*|\bposter\w*|\bterm paper\w*)/i;
 
 /** Extra words a faculty uses (MERLIN_EXAM_WORDS / MERLIN_SEMINAR_WORDS, comma separated); matched at word starts. */
 let extraExam: RegExp | undefined;

@@ -100,7 +100,8 @@ async function buildPartDirect<T>(part: PartName, fresh: boolean): Promise<T> {
 		if (part === 'main') await client.tools('moodle_whoami');
 		const data = (await BUILD[part](client.tools, s.year)) as T;
 		try {
-			localStorage.setItem(key, JSON.stringify({ at: Date.now(), year: s.year, data }));
+			// Signed out (or switched account) while this was loading: keep nothing of it.
+			if (getMerlin()?.token === s.token) localStorage.setItem(key, JSON.stringify({ at: Date.now(), year: s.year, data }));
 		} catch {
 			/* full or private: fine */
 		}

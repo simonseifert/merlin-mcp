@@ -141,3 +141,26 @@ describe('direct client', () => {
 		expect(String(err.message)).not.toContain(TOKEN);
 	});
 });
+
+describe('direct sign-in answer', () => {
+	it('md5 matches Node for ASCII, Unicode and block-boundary lengths', async () => {
+		const { createHash } = await import('node:crypto');
+		const { md5 } = await import('../dashboard/src/direct/md5');
+		for (const s of ['', 'abc', 'https://moodle.srce.hr/2026-2027a1b2c3', 'čćžšđ ✓', 'x'.repeat(55), 'x'.repeat(56), 'x'.repeat(64), 'x'.repeat(1000)]) {
+			expect(md5(s)).toBe(createHash('md5').update(s, 'utf8').digest('hex'));
+		}
+	});
+
+	it('accepts a launch answer only when its signature matches this sign-in', async () => {
+		const { createHash } = await import('node:crypto');
+		const { verifyLaunchAnswer } = await import('../dashboard/src/direct/session');
+		const origin = 'https://moodle.srce.hr';
+		const sign = (passport: string) => createHash('md5').update(`${origin}/${Y}${passport}`).digest('hex');
+		const answer = (sig: string) => `web+marlon://token=${btoa(`${sig}:::${TOKEN}:::privatetoken`)}`;
+		expect(verifyLaunchAnswer(answer(sign('mine')), Y, 'mine', origin)).toBe(TOKEN);
+		expect(verifyLaunchAnswer(answer(sign('theirs')), Y, 'mine', origin)).toBeNull(); // someone else's sign-in
+		expect(verifyLaunchAnswer(answer(sign('mine')), '2025-2026', 'mine', origin)).toBeNull(); // another year
+		expect(verifyLaunchAnswer(`token=${TOKEN}`, Y, 'mine', origin)).toBeNull(); // bare token, no signature
+		expect(verifyLaunchAnswer(answer(sign('')), Y, '', origin)).toBeNull(); // no sign-in started
+	});
+});

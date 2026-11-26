@@ -83,7 +83,7 @@ export async function handleDashboard(request: Request, env: DashEnv, register: 
 	const part = (url.searchParams.get('part') ?? 'main') as DashboardPart;
 	if (!DASHBOARD_PARTS.includes(part)) return new Response(JSON.stringify({ error: `part must be one of ${DASHBOARD_PARTS.join(', ')}` }), { status: 400, headers });
 	// Keyed by whose token answers too, so two tokens on one isolate never share a page.
-	const token = tokenForYear(env, year);
+	const token = tokenForYear(env, year) ?? '';
 	let h = 2166136261;
 	for (let i = 0; i < token.length; i++) h = Math.imul(h ^ token.charCodeAt(i), 16777619);
 	const key = `${(h >>> 0).toString(36)}:${part}:${year}`;

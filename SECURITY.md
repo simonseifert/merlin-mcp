@@ -23,15 +23,15 @@ Report privately through GitHub: [Security > Report a vulnerability](https://git
 | Threat | What stops it |
 |---|---|
 | The dashboard key leaks | `DASHBOARD_KEY` opens `GET /api/dashboard` and nothing else: not `/mcp`, `/api/call`, files or sends. It reads your points, calendar and announcements, so treat the `#key=` link like a password. The page keeps the key in local storage and strips it from the address bar, so it never reaches server logs. |
-| Another website reads a local dashboard | A Node server that listens only on loopback (and has no `MERLIN_PUBLIC_URL`) serves the dashboard without a key, but only to requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]`, and whose `Origin`, if sent, is local too. A page that points its own domain at your machine (DNS rebinding) gets 401. `DASHBOARD_OPEN=0` turns key-less mode off. |
-| One account seeing another's data | Every server cache entry is keyed by a hash of the token as well as the year, so two tokens never share an answer. The server build always reads the server's own token. |
+| Another website reads a local dashboard | A Node server that listens only on loopback (and has no `MERLIN_PUBLIC_URL`) serves the dashboard without a key, but only to requests whose `Host` is `localhost`, `127.0.0.1` or `[::1]`, and whose `Origin`, if sent, is local too. A page that points its own domain at your machine (DNS rebinding) gets 401. `DASHBOARD_OPEN=0` turns key-less mode off: set it behind any reverse proxy, even one on the same machine, because a proxy may forward `Host: 127.0.0.1`. |
+| One account seeing another's data | Every server cache that holds an answer from Merlin is keyed by a hash of the token as well as the year, so two tokens never share an answer. The server build always reads the server's own token. |
 | Merlin text running as code in the page | Moodle HTML is stripped server-side or in the client and rendered as text. There is no `dangerouslySetInnerHTML`. |
 
 **Direct build.** Each student signs in with their own Merlin account and the browser calls Merlin itself. No server sees the token.
 
 - **The token can do more than the page does.** SRCE's app sign-in hands out a mobile-app token, which Merlin also accepts for sending messages and submitting work. The page's client calls an allow-list of eight read-only functions and refuses everything else in code, but script running in the page could use the token fully. So the build ships a Content-Security-Policy (`connect-src 'self' https://moodle.srce.hr`, scripts only from the site itself, no inline scripts), loads nothing from other sites, and a `_headers` file forbids framing where the host supports it.
 - **Where the token lives.** In that browser's local storage, until the student signs out (which also deletes every saved page). It travels only in the POST body to Merlin, never in a URL, with no cookies and no redirects followed.
-- **Sign-in links.** A token arriving in the address bar (`#tok=`, the desktop auto-return) is accepted only within 15 minutes of a sign-in this browser started, and once. A link carrying someone else's token cannot sign a student in as that account.
+- **Sign-in links.** A token arriving in the address bar (`#tok=`, the desktop auto-return) is accepted only for the sign-in this browser started in the last 15 minutes, once, and only when Merlin's signature on it (md5 of the site address and that sign-in's random passport) matches. A link carrying someone else's token is refused. A token pasted by hand is the student's own choice and is not checked this way.
 - **Who you trust.** Students trust whoever hosts the page not to change its code. Host it only from a repo you control.
 
 ## Known side effects (by design)

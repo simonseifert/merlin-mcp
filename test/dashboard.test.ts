@@ -107,6 +107,8 @@ describe('classifyItem', () => {
 		['Završni rad: konzultacije', 'event'],
 		['Finalna verzija prezentacije uploadana', 'seminar'],
 		['Testiranje aplikacije', 'event'],
+		['Projekti - upute', 'seminar'],
+		['Primjer: t-test za dva uzorka', 'event'],
 	])('%s -> %s', (name, kind) => expect(classifyItem(name)).toBe(kind));
 
 	it('a weekly Moodle quiz called "Test" is a deadline, not an exam', () => {

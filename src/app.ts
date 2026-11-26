@@ -259,7 +259,7 @@ const TEN_MIN = 10 * 60_000;
  * a call made with another token (MOODLE_TOKENS per year, or any future multi-account use).
  */
 function owner(env: Env, year?: string): string {
-	const token = tokenForYear(env, year ?? currentYear(env));
+	const token = tokenForYear(env, year ?? currentYear(env)) ?? '';
 	let h = 2166136261;
 	for (let i = 0; i < token.length; i++) h = Math.imul(h ^ token.charCodeAt(i), 16777619);
 	return (h >>> 0).toString(36);

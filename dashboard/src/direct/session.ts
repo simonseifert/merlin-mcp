@@ -5,6 +5,7 @@
  * web+marlon return handler are Leon's, from the first version of the dashboard.
  */
 
+import { md5 } from './md5';
 import { createClient, isAuthError, MerlinError, MERLIN_ORIGIN } from './merlin';
 import { t } from '../i18n';
 
@@ -173,7 +174,7 @@ export function launchUrl(year: string, autoReturn = false): string {
 	const passport = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => b.toString(36).padStart(2, '0')).join('').slice(0, 20);
 	try {
 		// Remembered so a token coming back in the address bar is accepted only after a sign-in this browser started.
-		localStorage.setItem(PENDING_YEAR, JSON.stringify({ year, at: Date.now() }));
+		localStorage.setItem(PENDING_YEAR, JSON.stringify({ year, at: Date.now(), passport }));
 	} catch {
 		/* ignore */
 	}
@@ -186,31 +187,49 @@ export function launchUrl(year: string, autoReturn = false): string {
 const PENDING_MAX_MS = 15 * 60_000;
 
 /** The sign-in this browser started (year), if it is recent; read once, then forgotten. */
-function takePending(): string | undefined {
+function takePending(): { year: string; passport: string } | undefined {
 	try {
 		const raw = localStorage.getItem(PENDING_YEAR);
 		localStorage.removeItem(PENDING_YEAR);
-		const p = raw ? (JSON.parse(raw) as { year?: string; at?: number }) : undefined;
-		return p?.year && typeof p.at === 'number' && Date.now() - p.at < PENDING_MAX_MS ? p.year : undefined;
+		const p = raw ? (JSON.parse(raw) as { year?: string; at?: number; passport?: string }) : undefined;
+		return p?.year && p.passport && typeof p.at === 'number' && Date.now() - p.at < PENDING_MAX_MS ? { year: p.year, passport: p.passport } : undefined;
 	} catch {
 		return undefined;
 	}
 }
 
 /**
+ * launch.php answers token=base64(md5(site url + passport):::token[:::private token]). Returns the token
+ * only when the signature matches the sign-in this browser started (same check as scripts/get-token.mjs),
+ * so an answer from anyone else's sign-in is refused.
+ */
+export function verifyLaunchAnswer(answer: string, year: string, passport: string, origin = MERLIN_ORIGIN): string | null {
+	const m = /(?:^|[^a-z0-9_])token=([^&\s]+)/i.exec(answer.trim());
+	if (!m || !passport) return null;
+	try {
+		const [sig, tok] = atob(decodeURIComponent(m[1]).trim()).split(':::');
+		const token = (tok ?? '').trim().toLowerCase();
+		if (!/^[0-9a-f]{32}$/.test(token)) return null;
+		return sig === md5(`${origin}/${year}${passport}`) ? token : null;
+	} catch {
+		return null;
+	}
+}
+
+/**
  * If the browser returned a token to us via the handler (#tok=…), pull it out and wipe it from the URL.
- * Only accepted when this browser started a sign-in in the last 15 minutes, and only once: otherwise a
- * link carrying someone else's token could sign a student in as that account without them noticing.
+ * Only accepted for the sign-in this browser started in the last 15 minutes, once, and only when Merlin's
+ * signature matches that sign-in: a link carrying someone else's token is refused.
  */
 export function tokenFromHash(): { token: string; year: string } | null {
 	const m = /[#&]tok=([^&]+)/.exec(location.hash);
 	if (!m) return null;
 	history.replaceState(null, '', location.pathname + location.search);
-	const year = takePending();
-	if (!year) return null;
+	const pending = takePending();
+	if (!pending) return null;
 	try {
-		const token = extractToken(decodeURIComponent(m[1]));
-		return token ? { token, year } : null;
+		const token = verifyLaunchAnswer(decodeURIComponent(m[1]), pending.year, pending.passport);
+		return token ? { token, year: pending.year } : null;
 	} catch {
 		return null;
 	}
