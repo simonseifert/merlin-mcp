@@ -1,11 +1,26 @@
 import type { DashAnnouncements, Dashboard, DashGrades } from './types';
 import { demoDashboard } from './demo';
+import { buildAnnouncements, buildGrades, buildMain } from '../../src/dashboard-build';
+import { createClient, isAuthError, type DirectClient } from './direct/merlin';
+import { getMerlin, type MerlinSession } from './direct/session';
+
+export * from './direct/session';
+
+/**
+ * Direct mode (a build with VITE_MERLIN_DIRECT=1): every student signs in with their own Merlin
+ * account and this browser calls Merlin itself. No server is involved beyond serving the page.
+ */
+export const DIRECT = import.meta.env.VITE_MERLIN_DIRECT === '1';
 
 const KEY = 'marlon.key'; // single-user public server (#key= link)
 const LAST = 'marlon.last';
 
-/** The server wants the #key= link (a public server opened without it, or the key was rotated). */
-export class AuthError extends Error {}
+/** Why the dashboard can't load: 'key' = the server wants the #key= link; 'merlin' = sign in to Merlin (direct mode). */
+export class AuthError extends Error {
+	constructor(readonly kind: 'key' | 'merlin') {
+		super(kind);
+	}
+}
 
 export const isDemo = () => new URLSearchParams(location.search).has('demo');
 
@@ -47,7 +62,49 @@ export function lastDashboard(): Dashboard | undefined {
 type Parts = { main?: Dashboard; grades?: DashGrades; announcements?: DashAnnouncements };
 type PartName = keyof Parts;
 
+// ---------- direct mode: build each part in this browser ----------
+
+const PART_TTL_MS: Record<PartName, number> = { main: 5 * 60_000, announcements: 10 * 60_000, grades: 15 * 60_000 };
+const BUILD = { main: buildMain, grades: buildGrades, announcements: buildAnnouncements };
+let direct: { session: MerlinSession; client: DirectClient } | undefined;
+
+function directClient(s: MerlinSession): DirectClient {
+	if (direct?.session.token !== s.token || direct.session.year !== s.year) direct = { session: s, client: createClient(s.token, s.year) };
+	return direct.client;
+}
+
+async function buildPartDirect<T>(part: PartName, fresh: boolean): Promise<T> {
+	const s = getMerlin();
+	if (!s) throw new AuthError('merlin');
+	const key = `marlon.part.${part}`;
+	if (!fresh) {
+		try {
+			const hit = JSON.parse(localStorage.getItem(key) ?? 'null') as { at: number; year: string; data: T } | null;
+			if (hit && hit.year === s.year && Date.now() - hit.at < PART_TTL_MS[part]) return hit.data;
+		} catch {
+			/* no cache */
+		}
+	}
+	const client = directClient(s);
+	try {
+		// The account call first, so a dead token is a sign-in screen, not a page of errors (memoised: no extra call).
+		if (part === 'main') await client.tools('moodle_whoami');
+		const data = (await BUILD[part](client.tools, s.year)) as T;
+		try {
+			localStorage.setItem(key, JSON.stringify({ at: Date.now(), year: s.year, data }));
+		} catch {
+			/* full or private: fine */
+		}
+		return data;
+	} catch (err) {
+		if (isAuthError(err)) throw new AuthError('merlin');
+		if ((err as { retryAfterS?: number }).retryAfterS !== undefined) throw new Error('Merlin traži malo pauze. Probaj opet za minutu.');
+		throw err;
+	}
+}
+
 async function fetchPart<T>(part: PartName, fresh: boolean): Promise<T> {
+	if (DIRECT) return buildPartDirect<T>(part, fresh);
 	const key = getKey();
 	const res = await fetch(`/api/dashboard?part=${part}${fresh ? '&fresh=1' : ''}`, { headers: key ? { Authorization: `Bearer ${key}` } : {}, cache: 'no-store' });
 	if (res.status === 401) throw new AuthError('key');

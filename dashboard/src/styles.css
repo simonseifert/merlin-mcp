@@ -1539,3 +1539,129 @@ a:focus-visible,
 	padding: 11px 18px;
 	font-size: 14px;
 }
+
+/* ---------- login (direct mode) ---------- */
+.login {
+	position: relative;
+	z-index: 3;
+	min-height: 100vh;
+	min-height: 100dvh;
+	display: grid;
+	place-items: center;
+	align-content: center;
+	gap: 14px;
+	padding: 28px 18px calc(28px + env(safe-area-inset-bottom));
+}
+
+.login__card {
+	width: min(440px, 100%);
+	padding: 30px 28px 24px;
+	display: grid;
+	gap: 16px;
+	text-align: center;
+	background: var(--glass-strong);
+}
+
+.login__hero {
+	display: grid;
+	justify-items: center;
+	gap: 10px;
+}
+
+.login__mascot {
+	width: 150px;
+	height: 150px;
+	filter: drop-shadow(0 20px 36px rgba(20, 30, 90, 0.5));
+}
+
+.login__hero h1 {
+	margin: 2px 0 0;
+}
+
+.login__hero p {
+	margin: 0;
+	line-height: 1.5;
+	font-size: 14px;
+	max-width: 36ch;
+}
+
+.login__year {
+	display: grid;
+	gap: 8px;
+	justify-items: center;
+}
+
+.login__hint {
+	margin: -4px 0 0;
+	line-height: 1.5;
+}
+
+.login__alt {
+	margin: 0 auto;
+	justify-self: center;
+}
+
+.login__paste {
+	width: 100%;
+	resize: vertical;
+	border-radius: 14px;
+	border: 1px solid var(--line);
+	background: var(--hair);
+	color: var(--text);
+	padding: 12px 14px;
+	font: inherit;
+	font-size: 14px;
+	line-height: 1.4;
+	outline: none;
+}
+
+.login__paste:focus-visible {
+	border-color: var(--blue);
+	box-shadow: 0 0 0 3px color-mix(in srgb, var(--blue) 25%, transparent);
+}
+
+.login__error {
+	margin: 0;
+	color: var(--exam);
+	font-size: 13px;
+	line-height: 1.45;
+}
+
+.login__help {
+	text-align: left;
+	border-top: 1px solid var(--hair);
+	padding-top: 12px;
+}
+
+.login__help summary {
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 560;
+	color: var(--muted);
+	list-style: none;
+}
+
+.login__help summary::-webkit-details-marker {
+	display: none;
+}
+
+.login__help summary::before {
+	content: '▸ ';
+}
+
+.login__help[open] summary::before {
+	content: '▾ ';
+}
+
+.login__help ol {
+	margin: 10px 0 2px;
+	padding-left: 20px;
+	display: grid;
+	gap: 6px;
+	line-height: 1.45;
+}
+
+.login__foot {
+	max-width: 42ch;
+	text-align: center;
+}
