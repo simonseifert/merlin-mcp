@@ -153,7 +153,7 @@ describe('direct sign-in answer', () => {
 
 	it('accepts a launch answer only when its signature matches this sign-in', async () => {
 		const { createHash } = await import('node:crypto');
-		const { verifyLaunchAnswer } = await import('../dashboard/src/direct/session');
+		const { verifyLaunchAnswer } = await import('../dashboard/src/direct/launch');
 		const origin = 'https://moodle.srce.hr';
 		const sign = (passport: string) => createHash('md5').update(`${origin}/${Y}${passport}`).digest('hex');
 		const answer = (sig: string) => `web+marlon://token=${btoa(`${sig}:::${TOKEN}:::privatetoken`)}`;
